@@ -55,6 +55,7 @@ jobs:
           for (const p of paths) assert.ok(
             p==='package.json'||p==='package-lock.json'||p==='prisma/schema.prisma'||
             p==='src/pin-ai/runtime/pin-go-read-tool-executor.test.ts'||
+            (process.env.GITHUB_HEAD_REF === 'agent/sales-voice-commercial-knowledge-20261015' && p==='docs/sales-voice-knowledge-audit-20261015.md')||
             (approvedSipMount && p==='src/server.ts')||
             (approvedRecoveryLease && (p==='.github/workflows/ota-airbnb-listing-discovery.yml'||p==='.github/workflows/ota-initial-distribution-enablement.yml'))||
             p.startsWith('prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/')||

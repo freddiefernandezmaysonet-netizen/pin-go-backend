@@ -66,3 +66,20 @@ test("JavaScript landing knowledge is read from the build-generated public feed"
   const value=JSON.parse(await execute("search_pingo_official_website",'{"query":"limpieza"}'));
   assert.equal(value.status,"AVAILABLE");assert.equal(value.contentVersion,"a".repeat(64));assert.ok(value.content.includes("limpieza"));
 });
+test("expanded catalog is discoverable without sending every detail in the overview or startup",async()=>{
+ const {salesVoiceProductFacts,buildSalesVoiceProductKnowledge}=await import("./sales-voice-product-knowledge.service.js");
+ const execute=createSalesVoiceToolExecutor({},async()=>null);
+ const overview=JSON.parse(await execute("get_pingo_product_information",'{"topic":"overview","language":"es"}'));
+ assert.equal(overview.facts.length,8);assert.equal(overview.availableTopics.length,32);
+ assert.ok(overview.availableTopics.some((t:any)=>t.topic==="property_protection"));
+ assert.ok(!buildSalesVoiceProductKnowledge().includes("registrar casos de daños"));
+ for(const fact of salesVoiceProductFacts){
+  for(const language of ["es","en"]){
+   const raw=await execute("get_pingo_product_information",JSON.stringify({topic:fact.id,language}));
+   const answer=JSON.parse(raw);assert.equal(answer.status,"AVAILABLE");assert.equal(answer.facts.length,1);
+   assert.ok(answer.facts[0].conditions.length>20);assert.ok(!raw.includes("src/")&&!raw.includes("prisma/"));
+   assert.ok(Buffer.byteLength(raw)<24000);
+  }
+ }
+ assert.ok(Buffer.byteLength(JSON.stringify(overview))<24000);
+});

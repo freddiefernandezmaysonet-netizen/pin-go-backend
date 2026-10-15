@@ -1,4 +1,4 @@
-import {salesVoiceProductFacts,SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION} from "./sales-voice-product-knowledge.service.js";
+import {salesVoiceProductFacts,salesVoiceCoreTopicIds,SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION} from "./sales-voice-product-knowledge.service.js";
 import {readSalesVoicePricing,renderSalesVoicePricing,type PriceReader} from "./sales-voice-pricing.service.js";
 type Env=Readonly<Record<string,string|undefined>>;
 export type CommercialToolExecutor=(name:string,argumentsJson:string)=>Promise<string>;
@@ -69,10 +69,11 @@ export function createSalesVoiceToolExecutor(env:Env,readPrice:PriceReader,fetch
     if(name==="get_pingo_product_information"){
       if(Object.keys(args).sort().join(",")!=="language,topic"||!["es","en"].includes(String(args.language))
         ||typeof args.topic!=="string")return unavailable("INVALID_TOOL_ARGUMENTS");
-      const facts=args.topic==="overview"?salesVoiceProductFacts:salesVoiceProductFacts.filter(f=>f.id===args.topic);
+      const facts=args.topic==="overview"?salesVoiceProductFacts.filter(f=>salesVoiceCoreTopicIds.includes(f.id)):salesVoiceProductFacts.filter(f=>f.id===args.topic);
       if(!facts.length)return unavailable("UNKNOWN_PRODUCT_TOPIC");
       return JSON.stringify({status:"AVAILABLE",source:"Pin&Go commercial backend",version:SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION,
         overview:args.language==="es"?"Pin&Go es una plataforma integral para administrar propiedades vacacionales.":"Pin&Go is an all-in-one vacation rental property management platform.",
+        ...(args.topic==="overview"?{availableTopics:salesVoiceProductFacts.map(f=>({topic:f.id,title:args.language==="es"?(f.titleEs??f.id):(f.titleEn??f.id)}))}:{}),
         facts:facts.map(f=>({topic:f.id,information:args.language==="es"?f.es:f.en,conditions:f.limit}))});
     }
     if(name==="get_pingo_current_prices"){

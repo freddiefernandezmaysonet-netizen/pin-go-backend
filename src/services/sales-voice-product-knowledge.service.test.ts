@@ -9,7 +9,7 @@ import {postOneOpenAILiveAccept,type ProviderHTTP} from "./sales-voice-live-admi
 test("reviewed bilingual knowledge has repository evidence and cannot be mutated",()=>{
   assert.match(SALES_VOICE_PRODUCT_KNOWLEDGE_SOURCE_COMMIT,/^[a-f0-9]{40}$/);
   assert.equal(new Set(salesVoiceProductFacts.map(f=>f.id)).size,salesVoiceProductFacts.length);
-  assert.equal(salesVoiceProductFacts.length,8);
+  assert.equal(salesVoiceProductFacts.length,32);
   for(const f of salesVoiceProductFacts){
     assert.ok(f.es.length>20&&f.en.length>20&&f.limit.length>20&&f.sources.length>0);
     assert.ok(Object.isFrozen(f)&&Object.isFrozen(f.sources));
