@@ -1,6 +1,8 @@
 import type {SidebandSocketFactory} from "./sales-voice-sideband-supervisor.service.js";
+import {SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES} from "./sales-voice-protocol-limits.service.js";
 type Summary={inputSeen:boolean;outputSeen:boolean;outputBeforeInput:boolean;delegations:number;completed:number;failed:number;validationFailed:boolean;
-  clientDelegations:number;responsesDelegations:number;backendStarted:number;backendTextSeen:boolean;providerErrors:number;lastErrorCategory?:string};
+  clientDelegations:number;responsesDelegations:number;backendStarted:number;backendTextSeen:boolean;providerErrors:number;lastErrorCategory?:string;
+  transportFailure?:"MESSAGE_TOO_LARGE"|"CONNECTION";closeCode?:number};
 /** Classify in memory; never emit provider messages, codes or parameter values. */
 function errorCategory(error:unknown):string{
   if(!error||typeof error!=="object")return "OTHER";
@@ -31,7 +33,7 @@ export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFact
       if(!open||closed)return;
       try{
         const data=typeof raw==="string"?raw:Buffer.isBuffer(raw)?raw.toString("utf8"):null;
-        if(data===null||Buffer.byteLength(data)>16384)return;
+        if(data===null||Buffer.byteLength(data)>SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES)return;
         const event=JSON.parse(data);
         if(!event||typeof event!=="object"||Array.isArray(event))return;
         if("session_id" in event&&event.session_id!==url.split("/").at(-2))return;
@@ -57,7 +59,16 @@ export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFact
         }
       }catch{/* malformed or unsupported input cannot alter monitoring */ }
     });
-    socket.on("close",()=>{if(!closed){closed=true;emit();}});
+    socket.on("error",error=>{
+      if(closed)return;
+      summary.transportFailure=(error as {code?:unknown})?.code==="WS_ERR_UNSUPPORTED_MESSAGE_LENGTH"?"MESSAGE_TOO_LARGE":"CONNECTION";
+      emit();
+    });
+    socket.on("close",code=>{if(!closed){
+      closed=true;
+      if(typeof code==="number"&&Number.isInteger(code)&&code>=1000&&code<=4999)summary.closeCode=code;
+      emit();
+    }});
     return socket;
   };
 }

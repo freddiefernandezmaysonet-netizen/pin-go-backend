@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES } from "./sales-voice-protocol-limits.service.js";
 import {
   parseBoundLiveSidebandEvent, noteLiveUsage, finalizeLiveClosed,
 } from "./sales-voice-live-watchdog.service.js";
@@ -91,7 +92,7 @@ export async function observeExistingLiveSession(input: {
   const socket = input.connect(url, {
     headers: { Authorization: "Bearer " + input.apiKey },
     handshakeTimeout: 5000,
-    maxPayload: 16 * 1024,
+    maxPayload: SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES,
     perMessageDeflate: false,
   });
   if (!socket || typeof socket.on !== "function" || typeof socket.close !== "function") {
@@ -120,7 +121,7 @@ export async function observeExistingLiveSession(input: {
       if (terminal) return;
       const data = typeof raw === "string" ? raw :
         Buffer.isBuffer(raw) ? raw.toString("utf8") : null;
-      if (data === null || Buffer.byteLength(data, "utf8") > 16 * 1024) {
+      if (data === null || Buffer.byteLength(data, "utf8") > SALES_VOICE_SIDEBAND_MAX_MESSAGE_BYTES) {
         settle("PROCESSING_ERROR"); return;
       }
       let event: unknown;
