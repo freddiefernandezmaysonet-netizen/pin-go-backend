@@ -1,12 +1,14 @@
 import type {SidebandSocketFactory} from "./sales-voice-sideband-supervisor.service.js";
-type Summary={inputSeen:boolean;outputSeen:boolean;outputBeforeInput:boolean;delegations:number;completed:number;failed:number;validationFailed:boolean};
+type Summary={inputSeen:boolean;outputSeen:boolean;outputBeforeInput:boolean;delegations:number;completed:number;failed:number;validationFailed:boolean;
+  clientDelegations:number;responsesDelegations:number;backendStarted:number;backendTextSeen:boolean;providerErrors:number};
 /** Passive metadata only. Never records text, audio, identifiers, error messages or tool arguments. */
 export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFactory,
-  report:(value:Readonly<Summary>)=>void=value=>console.info("[sales-voice] conversation",value),
+  report:(value:Readonly<Summary>)=>void=value=>console.info("[sales-voice] conversation "+JSON.stringify(value)),
 ):SidebandSocketFactory{
   return (url,options)=>{
     const socket=connect(url,options);
-    const summary:Summary={inputSeen:false,outputSeen:false,outputBeforeInput:false,delegations:0,completed:0,failed:0,validationFailed:false};
+    const summary:Summary={inputSeen:false,outputSeen:false,outputBeforeInput:false,delegations:0,completed:0,failed:0,validationFailed:false,
+      clientDelegations:0,responsesDelegations:0,backendStarted:0,backendTextSeen:false,providerErrors:0};
     let open=false,closed=false;
     const emit=()=>{try{report(Object.freeze({...summary}));}catch{/* no call-control effects */}};
     socket.on("open",()=>{open=true;});
@@ -22,10 +24,21 @@ export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFact
         if(event.type==="session.output_transcript.delta"&&!summary.outputSeen){
           summary.outputSeen=true;summary.outputBeforeInput=!summary.inputSeen;emit();
         }
-        if(event.type==="session.delegation.created"&&summary.delegations<100){summary.delegations++;emit();}
+        if(event.type==="session.delegation.created"&&summary.delegations<100){
+          summary.delegations++;
+          if(event.delegation?.target==="client")summary.clientDelegations++;
+          if(event.delegation?.target==="responses")summary.responsesDelegations++;
+          emit();
+        }
+        if(event.type==="response.event"&&event.event?.type==="response.created"&&summary.backendStarted<100){summary.backendStarted++;emit();}
+        if(event.type==="response.event"&&event.event?.type==="response.output_text.delta"&&!summary.backendTextSeen){summary.backendTextSeen=true;emit();}
         if(event.type==="response.event"&&event.event?.type==="response.completed"&&summary.completed<100){summary.completed++;emit();}
         if(event.type==="response.event"&&(event.event?.type==="response.failed"||event.event?.type==="response.incomplete")&&summary.failed<100){summary.failed++;emit();}
-        if(event.type==="error"&&event.error?.code==="responses_validation_failed"&&!summary.validationFailed){summary.validationFailed=true;emit();}
+        if(event.type==="error"&&summary.providerErrors<100){
+          summary.providerErrors++;
+          if(event.error?.code==="responses_validation_failed")summary.validationFailed=true;
+          emit();
+        }
       }catch{/* malformed or unsupported input cannot alter monitoring */ }
     });
     socket.on("close",()=>{if(!closed){closed=true;emit();}});
