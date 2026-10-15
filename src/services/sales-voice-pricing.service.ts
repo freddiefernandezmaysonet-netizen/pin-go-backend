@@ -68,7 +68,7 @@ export function renderSalesVoicePricing(snapshot:PricingSnapshot):string{
     "Consultado / checked: "+new Date(snapshot.checkedAt).toISOString()+". Valido hasta / valid until: "+new Date(snapshot.expiresAt).toISOString()+".",
     ...snapshot.lines,
     ...(snapshot.addonLines??[]),
-    "Cotiza solamente ofertas VERIFIED y dentro de su vigencia; UNAVAILABLE no confirma ningun importe. Si falta o vence el dato, dilo inmediatamente y ofrece app.pin-ngo.com/signup; nunca prometas verificar despues.",
+    "Cotiza solamente ofertas VERIFIED y dentro de su vigencia; UNAVAILABLE no confirma ningun importe. Si falta o vence el dato, dilo inmediatamente y ofrece pin-ngo.com; nunca prometas verificar despues.",
     "Responde en el idioma elegido. Explica frecuencia, precio por cerradura y plazo antes de recomendar. Para varias cerraduras de plataforma puedes calcular precio base por cantidad, siempre antes de impuestos. El anual se cobra por año, no mensualmente.",
     "HaaS corresponde a una cerradura y mensualidad del paquete con hardware; no prometas stock, instalacion ni inclusiones adicionales. Para complementos usa solo sus tarifas verificadas y condiciones separadas. No cotices descuentos, impuestos exactos ni totales finales.",
   ].join("\n");

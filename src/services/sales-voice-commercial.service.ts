@@ -196,7 +196,7 @@ export class SalesVoiceCommercialService {
     if (!prospect) reject("PROSPECT_NOT_FOUND");
     if (prospect.convertedAt || prospect.convertedOrganizationId) reject("ALREADY_CONVERTED");
     // No PII, auto-login credential, payment token or caller ID in this URL.
-    return { url: "https://app.pin-ngo.com/signup", status: "CUSTOMER_ACTION_REQUIRED" };
+    return { url: "https://pin-ngo.com", status: "CUSTOMER_ACTION_REQUIRED" };
   }
 
   async prepareFollowUp(input: {
