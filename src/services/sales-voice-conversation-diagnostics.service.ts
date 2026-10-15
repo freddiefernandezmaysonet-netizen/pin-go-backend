@@ -1,6 +1,21 @@
 import type {SidebandSocketFactory} from "./sales-voice-sideband-supervisor.service.js";
 type Summary={inputSeen:boolean;outputSeen:boolean;outputBeforeInput:boolean;delegations:number;completed:number;failed:number;validationFailed:boolean;
-  clientDelegations:number;responsesDelegations:number;backendStarted:number;backendTextSeen:boolean;providerErrors:number};
+  clientDelegations:number;responsesDelegations:number;backendStarted:number;backendTextSeen:boolean;providerErrors:number;lastErrorCategory?:string};
+/** Classify in memory; never emit provider messages, codes or parameter values. */
+function errorCategory(error:unknown):string{
+  if(!error||typeof error!=="object")return "OTHER";
+  const e=error as Record<string,unknown>;
+  const text=[e.type,e.code,e.param,e.message].filter(v=>typeof v==="string").join(" ").toLowerCase();
+  if(/insufficient_quota|quota|billing|credit/.test(text))return "QUOTA";
+  if(/rate.?limit|too many requests/.test(text))return "RATE_LIMIT";
+  if(/authentication|invalid_api_key|permission|unauthorized/.test(text))return "AUTHORIZATION";
+  if(/model.*(not.*found|not.*exist|access|support)|model_not_found/.test(text))return "MODEL_ACCESS";
+  if(/reasoning/.test(text))return "REASONING_CONFIGURATION";
+  if(/max_output_tokens|max_tokens/.test(text))return "OUTPUT_LIMIT_CONFIGURATION";
+  if(/invalid_request|unknown_parameter|unsupported|invalid_parameter/.test(text))return "REQUEST_CONFIGURATION";
+  if(/server_error|internal_error|overloaded/.test(text))return "PROVIDER_INTERNAL";
+  return "OTHER";
+}
 /** Passive metadata only. Never records text, audio, identifiers, error messages or tool arguments. */
 export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFactory,
   report:(value:Readonly<Summary>)=>void=value=>console.info("[sales-voice] conversation "+JSON.stringify(value)),
@@ -36,6 +51,7 @@ export function withSalesVoiceConversationDiagnostics(connect:SidebandSocketFact
         if(event.type==="response.event"&&(event.event?.type==="response.failed"||event.event?.type==="response.incomplete")&&summary.failed<100){summary.failed++;emit();}
         if(event.type==="error"&&summary.providerErrors<100){
           summary.providerErrors++;
+          summary.lastErrorCategory=errorCategory(event.error);
           if(event.error?.code==="responses_validation_failed")summary.validationFailed=true;
           emit();
         }
