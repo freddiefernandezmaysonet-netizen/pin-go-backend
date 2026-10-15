@@ -30,6 +30,7 @@ export function liveSidebandAttachUrl(sessionId: string): string {
 }
 
 export type SidebandWebSocket = {
+  send?: (data:string)=>void;
   on: (event: "open" | "message" | "close" | "error",
     cb: (...args: unknown[]) => void) => unknown;
   close: (code?: number, reason?: string) => void;
