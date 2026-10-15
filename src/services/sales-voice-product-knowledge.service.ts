@@ -1,10 +1,11 @@
+import {salesVoiceDetailedKnowledge} from "./sales-voice-detailed-knowledge.service.js";
 /** Reviewed product facts, separate from call control. No DB, env or provider
  * access. Provenance records implementation evidence, not a tenant's activation.
  * Pricing requires a validated per-call snapshot; executable sales tools remain separate.
  */
-export const SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION="20261014-v1";
-export const SALES_VOICE_PRODUCT_KNOWLEDGE_SOURCE_COMMIT="8261a4945d57d567cab63598c0977e0a943a0d2d";
-type Fact=Readonly<{id:string;es:string;en:string;limit:string;sources:readonly string[]}>;
+export const SALES_VOICE_PRODUCT_KNOWLEDGE_VERSION="20261015-v2";
+export const SALES_VOICE_PRODUCT_KNOWLEDGE_SOURCE_COMMIT="ed3e17cb492ccf23830c39daef94d6cf784a2ac6";
+type Fact=Readonly<{id:string;titleEs?:string;titleEn?:string;es:string;en:string;limit:string;sources:readonly string[]}>;
 const reviewedFacts:Fact[]=[
   {
     "id": "direct_booking",
@@ -89,13 +90,14 @@ const reviewedFacts:Fact[]=[
   }
 ];
 export const salesVoiceProductFacts:readonly Fact[]=Object.freeze(
-  reviewedFacts.map(f=>Object.freeze({...f,sources:Object.freeze([...f.sources])})),
+  [...reviewedFacts,...salesVoiceDetailedKnowledge].map(f=>Object.freeze({...f,sources:Object.freeze([...f.sources])})),
 );
+export const salesVoiceCoreTopicIds:readonly string[]=Object.freeze(reviewedFacts.map(f=>f.id));
 export function buildSalesVoiceProductKnowledge():string {
   return [
     "Conocimiento comercial verificado de Pin&Go. Responde solo sobre la necesidad del interlocutor; no leas todo el catalogo. Usa la version ES o EN segun el idioma elegido, sin repetir ambas.",
     "Estas son capacidades de la plataforma, no prueba de activacion en la cuenta de un prospecto ni autorizacion para ejecutar acciones.",
-    ...salesVoiceProductFacts.map(f=>f.es+" EN: "+f.en+" Condiciones: "+f.limit),
+    ...salesVoiceProductFacts.filter(f=>reviewedFacts.some(core=>core.id===f.id)).map(f=>f.es+" EN: "+f.en+" Condiciones: "+f.limit),
   ].join("\n");
 }
 export function buildSalesVoiceSalesCoaching():string {
