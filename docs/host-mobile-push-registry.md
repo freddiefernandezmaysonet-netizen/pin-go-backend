@@ -1,0 +1,13 @@
+# Host mobile push registry — prepared backend
+
+The native backend routes are mounted under /api/host-mobile/notifications, independently of incident feature availability. HOST_MOBILE_PUSH_REGISTRATION_ENABLED must explicitly be true; its default is off. No deployment or activation was performed.
+
+POST /devices accepts only an Expo push token, platform ios/android and the exact Host EAS project f7037a5c-4526-46d7-b7bb-fb56e2be2f8f. User/organization/session come from a signed current session in ENFORCE mode and current Host role. Cookie/Origin requests fail closed. Token text is encrypted with an independent versioned server-owned keyring (HOST_MOBILE_PUSH_TOKEN_KEYS, HOST_MOBILE_PUSH_TOKEN_KEY_ID), scoped as authenticated data to organization, user, session and token hash. Never put keys or tokens in chat, logs or Git. The server returns registration status only. No key was created or configured here.
+
+A token hash has one binding. Possession of the token permits rebinding on account switch; replacement changes actor/session scope and ciphertext atomically. DELETE /devices/session retires only the current actor's current session bindings. Registrations expire after 30 days, but expiry is not a substitute for current session validation at dispatch.
+
+GET /preferences returns only the current actor's settings, default disabled. PUT /preferences accepts explicit enabled/kinds/timezone/quietHours/expectedRevision and uses a serializable version check. Lost update responses require GET readback; never silently replay a stale revision. Preference changes do not alter existing email/SMS rules.
+
+The schema/migration adds two tables. CI applies the migration only to the isolated Host test database and exercises uniqueness, preference concurrency and scoped retirement. Local 19 Host tests passed; three PostgreSQL suites were skipped locally and must pass remotely. HTTP tests cover current signed sessions, revoked session, changed role, unavailable validation, denied Cookie/Origin transports, invalid tokens and disabled registration. Prisma schema validation and TypeScript passed.
+
+Still incomplete: mobile OS permission/token integration, app preference screen and logout cleanup; durable attention-event outbox and provider dispatch/receipt tracking; token decryption/rotation lifecycle and expired-device cleanup; dispatch-time revalidation of actor, organization, property and session; physical iOS/Android testing. No delivery worker exists and no push notification is sent by these routes. Keep all push sending disabled until that full path is implemented and reviewed. Do not present this registry as working push delivery.

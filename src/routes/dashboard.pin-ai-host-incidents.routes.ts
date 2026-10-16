@@ -1,4 +1,5 @@
 import { Router, type Request, type RequestHandler } from "express";
+import { buildHostMobileNotificationsRouter } from "./host-mobile-notifications.routes.js";
 import type { PrismaClient } from "@prisma/client";
 import { verifySessionBoundAuthToken } from "../auth/session-bound-token.js";
 import { guardAuthenticatedSession } from "../auth/session-request-guard.js";
@@ -9,6 +10,7 @@ import { applyHostIncidentCommand, listHostIncidents, readHostIncident, readPubl
 
 export function buildHostIncidentRouter(input: { prisma: PrismaClient; env: HostEnvironment }) {
   const router = Router(), root = "/api/dashboard/pin-ai/incidents";
+  router.use(buildHostMobileNotificationsRouter(input));
   const enabled: RequestHandler = (_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (input.env.PIN_AI_HOST_INCIDENT_ENABLED !== "true") { res.status(404).json({ ok: false, error: "NOT_FOUND" }); return; }
