@@ -1,4 +1,3 @@
-import { buildHostCleaningsRouter } from "./routes/host-cleanings.routes.js";
 import { adminHaasRouter } from "./routes/admin.haas.routes.js";
 import "dotenv/config";
 import { buildCleanerAccountRouter } from "./routes/cleaner-account.routes.js";
@@ -227,7 +226,6 @@ app.use(
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(buildCleanerSurfaceGuard(prisma));
 app.use(buildCleanerAccountRouter(prisma));
-app.use(buildHostCleaningsRouter(prisma));
 app.use(buildCleaningChecklistRouter(prisma));
 app.use(buildCleaningRecoveryPolicyRouter(prisma));
 app.use(buildTtlockCallbackCanaryRouter(prisma, process.env));
