@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - "src/pin-ai/**"
+      - "src/services/host-mobile-notification.policy*"
       - "src/routes/dashboard.pin-ai-host-incidents.routes.ts"
       - "src/server.ts"
       - "src/apms/operational-intelligence*"
@@ -77,10 +78,11 @@ jobs:
           done
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
-        run: node --import tsx --test src/pin-ai/host/*.test.ts
+        run: node --import tsx --test src/pin-ai/host/*.test.ts src/services/host-mobile-notification.policy.test.ts
       - name: Strict typecheck and emitted build
         run: |
           npx tsc -p tsconfig.pin-ai-host-incidents.json
+          npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck src/services/host-mobile-notification.policy.ts src/services/host-mobile-notification.policy.test.ts
           npx tsc -p tsconfig.pin-ai-host-incidents.json --noEmit false --outDir /tmp/host-incident-build
       - name: Existing guest runtime and incident regression tests
         run: |
