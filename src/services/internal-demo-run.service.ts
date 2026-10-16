@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { ingestReservation } from "./ingest.service.js";
-import { completeInternalDemoSecurePrecheckin } from "./internal-demo-secure-precheckin.service.js";
 import { applyInternalDemoDirectBookingParity } from "./internal-demo-direct-booking-parity.service.js";
 import { dispatchPendingCleaningConfirmationForReservation } from "./cleaning-confirmation-dispatch.service.js";
 import { resolveInternalDemoPrimaryAdmin } from "./internal-demo-primary-admin.service.js";
@@ -21,7 +20,7 @@ function requestId(value: unknown) {
   if (typeof value !== "string" || !/^[a-f0-9-]{36}$/.test(value)) throw new DemoRunError("DEMO_REQUEST_ID_REQUIRED", 400);
   return value;
 }
-const dependencies = { ingest: ingestReservation, secure: completeInternalDemoSecurePrecheckin,
+const dependencies = { ingest: ingestReservation,
   parity: applyInternalDemoDirectBookingParity, cleaning: dispatchPendingCleaningConfirmationForReservation };
 
 export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, env = process.env) {
@@ -97,7 +96,7 @@ export async function readDemoRun(db: PrismaClient, actor: DemoActor, id: string
   return { requestId: id, reservation: { id: r.id, reservationNumber: r.reservationNumber, guestName: r.guestName,
     checkIn: r.checkIn, checkOut: r.checkOut, status: r.status, accessGrants: r.accessGrants, NfcAssignment: r.NfcAssignment },
     propertyName: r.property.name, timezone: r.property.timezone, paymentSimulated: true,
-    identitySimulated: true, paymentState: r.paymentState,
+    identitySimulated: (r.guestAgreementAcceptance as any)?.simulated === true, paymentState: r.paymentState,
     stage: raw.demoRun?.stage ?? "CREATED", lastError: raw.demoRun?.lastError ?? null,
     secureReady: r.guestAccessReleaseStatus === "ELIGIBLE" || r.guestAccessReleaseStatus === "RELEASED",
     manageReservationUrl: r.guestToken ? `${origin}/booking/manage/${encodeURIComponent(r.guestToken)}` : null,
@@ -165,9 +164,8 @@ export async function runInternalDemo(db: PrismaClient, actor: DemoActor, body: 
       const current = await db.reservation.findUniqueOrThrow({ where: { id: reservationId } });
       if ((current.externalRaw as any)?.demoRun?.stage === "READY") return;
       if (current.checkOut <= new Date()) throw new DemoRunError("DEMO_DATES_EXPIRED");
-      await setStage("SECURE_PRECHECKIN");
-      if (!current.guestAgreementSignedAt) await deps.secure(db, { reservationId: reservationId!, actor,
-        delivery: { preferredLanguage: input.preferredLanguage, smsConsent: input.smsConsent } });
+      // Native ingest captures the agreement and leaves guest verification pending.
+      // Only the guest-facing registration flow may accept it for a new Demo run.
       await setStage("CONFIRMATIONS");
       const parity = await deps.parity(db, { reservationId: reservationId!, preferredLanguage: input.preferredLanguage });
       if (!parity.guestEmail.ok || parity.hostEmail.sent !== 1) throw new DemoRunError("DEMO_EMAIL_ATTENTION_REQUIRED");

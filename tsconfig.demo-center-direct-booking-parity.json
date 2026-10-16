@@ -17,6 +17,7 @@
     "src/services/internal-demo-secure-precheckin.service.test.ts",
     "src/services/internal-demo-native-secure-precheckin.db.test.ts",
     "src/services/internal-demo-commercial.db.test.ts",
+    "src/services/internal-demo-real-precheckin.test.ts",
     "src/services/internal-demo-nfc-diagnostics.test.ts",
     "src/services/guest-passcode-provision.service.test.ts",
     "src/services/reservation-complete-flow-audit.service.ts",

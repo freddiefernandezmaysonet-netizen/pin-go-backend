@@ -976,7 +976,8 @@ export async function getGuestCancellationPreview({
       totalAmount: reservation.totalAmount, pricingBreakdown: reservation.pricingBreakdown,
       requestedAt, actor: CancellationActor.GUEST });
     return { ...serializeGuestCancellationPreview({ reservation, snapshot, evaluation, managementPhase }),
-      demo: { paymentSimulated: true, identitySimulated: true, timezone: reservation.property.timezone }, cancellationAllowed: false,
+      demo: { paymentSimulated: true, identitySimulated: (reservation.guestAgreementAcceptance as any)?.simulated === true,
+        timezone: reservation.property.timezone }, cancellationAllowed: false,
       modificationAllowed: false, action: "DEMO_READ_ONLY" };
   }
 

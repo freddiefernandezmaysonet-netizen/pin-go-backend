@@ -209,6 +209,7 @@ export async function applyInternalDemoDirectBookingParity(
   if (updated.guestEmail) {
     const payload = {
       demoSimulation: true,
+      demoPrecheckinRequired: !reservation.guestAgreementSignedAt,
       demoGuestAgreement: {
         title: agreement.title,
         version: agreement.version,

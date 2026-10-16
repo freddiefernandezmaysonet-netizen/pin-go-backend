@@ -240,14 +240,17 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.ok(emails[0].html.includes(`/booking/manage/${token}`));
     assert.ok(emails.every(e => e.html.includes("Demo") && e.html.includes(number)));
     assert.ok(emails[0].html.includes("sin cobro"));
-    assert.ok(!emails[0].html.includes(`/guest/verify/${token}`));
+    assert.ok(emails[0].html.includes(`/guest/verify/${token}`));
     assert.ok(emails[0].html.includes("Acuerdo del huésped · Demo"));
     assert.ok(emails[0].html.includes("Acuerdo &amp; Demo"));
     assert.ok(emails[0].html.includes("Versión: 1"));
     assert.ok(emails[0].html.includes("Condiciones guardadas<br />Texto &lt;sin HTML&gt;"));
-    assert.ok(emails[0].html.includes("aceptación es simulada"));
+    assert.ok(emails[0].html.includes("Aún no está firmado"));
     assert.ok(!emails[0].html.includes("Synthetic terms"), "uses the localized reservation snapshot");
-    assert.equal((saved.guestAgreementAcceptance as any).simulated, true);
+    assert.equal(saved.guestAgreementSignedAt, null);
+    assert.equal(saved.guestAgreementAcceptance, null);
+    assert.equal(failed.body.data.secureReady, false);
+    assert.equal(failed.body.data.identitySimulated, false);
     assert.equal((await command({ ...input, guestEmail: "changed@example.invalid" })).status, 409);
     assert.equal(emails.length, 2);
   });
@@ -259,6 +262,10 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.ok("reservation" in preview);
     assert.equal(preview.reservation.reservationNumber, number); assert.equal((preview as any).demo.timezone, property.timezone);
     assert.equal(preview.cancellationAllowed, false);
+    assert.ok("demo" in preview);
+    assert.equal(preview.demo.identitySimulated, false);
+    assert.equal(preview.securePreCheckin.completed, false);
+    assert.ok(preview.securePreCheckin.url?.endsWith(token));
     await assert.rejects(cancelReservationFromGuestPortal({ guestToken: token }), /Commercial cancellation/);
     await assert.rejects(getGuestReservationModificationOptions({ guestToken: token }));
     await assert.rejects(refundDirectBookingReservation({ organizationId: org.id, reservationId }));
@@ -289,6 +296,11 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal((await sendInternalDemoMessage(uncertain)).ok, false); assert.equal(attempts, 1);
   });
   await t.test("real grant service provisions exact minute window only on Demo lock; guest NFC uses same dates", async () => {
+    // Explicit synthetic verification fixture for the hardware portion only.
+    // Demo creation above must leave acceptance to the participant.
+    await completeInternalDemoSecurePrecheckin(db, { reservationId,
+      actor: { userId: platform.id, organizationId: org.id, email: platform.email, role: "PLATFORM_ADMIN" },
+      delivery: { preferredLanguage: "es", smsConsent: true } });
     const { activateGrant } = await import("./ttlock/ttlock.brain.js");
     const { assignNfcCards } = await import("./nfc.service.js");
     const grant = await db.accessGrant.findFirstOrThrow({ where: { reservationId, type: "GUEST" } });
