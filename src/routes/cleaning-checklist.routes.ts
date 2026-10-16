@@ -1,3 +1,4 @@
+import { buildHostCleaningsRouter } from "./host-cleanings.routes.js";
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -6,6 +7,7 @@ import { CleaningChecklistError, readOwnChecklist, saveChecklistTemplate, setChe
 import { CleaningActionWindowError } from "../services/cleaning-action-window.js";
 export function buildCleaningChecklistRouter(db: PrismaClient) {
   const router = Router();
+  router.use(buildHostCleaningsRouter(db));
   const fail = (res: any, error: unknown) => res.status(error instanceof CleaningChecklistError ? error.status : error instanceof CleaningActionWindowError ? 409 : 500).json({ error: error instanceof CleaningChecklistError ? error.code : error instanceof CleaningActionWindowError ? error.message : "CHECKLIST_REQUEST_FAILED" });
   router.use("/api/properties/:propertyId/cleaning-checklist", requireAuth, async (req: any, res, next) => {
     if (!["ADMIN", "ORG_ADMIN", "PLATFORM_ADMIN"].includes(req.user?.role)) return res.status(403).json({ error: "HOST_ADMIN_REQUIRED" });
