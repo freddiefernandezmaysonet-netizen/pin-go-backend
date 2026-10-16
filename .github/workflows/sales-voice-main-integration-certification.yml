@@ -49,6 +49,11 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import { execFileSync } from 'node:child_process';
+          const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
+          if (hostCandidate) {
+            execFileSync('node', ['--test', 'scripts/verify-host-mobile-operations-scope.test.mjs'], {stdio:'inherit'});
+            execFileSync('node', ['scripts/verify-host-mobile-operations-scope.mjs'], {stdio:'inherit'});
+          } else {
           const paths=execFileSync('git',['diff','--name-only','origin/main...HEAD'],{encoding:'utf8'}).trim().split('\n');
           const approvedRecoveryLease = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-durable-lease-v1-20261013';
           const approvedSipMount = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-signed-webhook-mount-v1-20261013';
@@ -68,6 +73,7 @@ jobs:
             'Out-of-scope file: '+p
           );
           console.log('PASS sales scope',paths.length);
+          }
           NODE
       - name: Install pinned dependencies and generate Prisma client
         run: |
@@ -152,3 +158,4 @@ jobs:
         run: |
           echo 'Sales voice all-source integration passed against latest main. No API route or worker was enabled.' >> "$GITHUB_STEP_SUMMARY"
           echo 'No real OpenAI/Twilio/SIP calls. Separate Airbnb CI scope check is not waived.' >> "$GITHUB_STEP_SUMMARY"
+

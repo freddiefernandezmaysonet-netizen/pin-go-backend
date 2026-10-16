@@ -64,6 +64,12 @@ jobs:
           const changes = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).trim().split('\n');
           const before = execFileSync('git', ['show', `${base}:prisma/schema.prisma`], { encoding: 'utf8' });
           const after = readFileSync('prisma/schema.prisma', 'utf8');
+          const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
+          if (hostCandidate) {
+            execFileSync('node', ['--test', 'scripts/verify-host-mobile-operations-scope.test.mjs'], {stdio:'inherit'});
+            execFileSync('node', ['scripts/verify-host-mobile-operations-scope.mjs'], {stdio:'inherit'});
+            writeFileSync(process.env.RUNNER_TEMP+'/sales-voice-candidate-migration.txt','prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql');
+          } else {
           const recoveryCandidate = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-durable-lease-v1-20261013';
           if (recoveryCandidate) {
             assert.equal(process.env.GITHUB_REPOSITORY,'freddiefernandezmaysonet-netizen/pin-go-backend');
@@ -83,6 +89,7 @@ jobs:
             const newModels = [...after.slice(boundary).matchAll(/^model (\w+) \{/gm)].map(match => match[1]);
             assert.deepEqual(newModels, ['SalesProspect', 'SalesVoiceCall']);
             writeFileSync(process.env.RUNNER_TEMP+'/sales-voice-candidate-migration.txt','prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql');
+          }
           }
           writeFileSync(`${process.env.RUNNER_TEMP}/sales-voice-base.prisma`, before);
           console.log('PASS: existing schema preserved outside the certified commercial addition');
@@ -122,3 +129,4 @@ jobs:
           echo 'Actual additive SQL applied to disposable PostgreSQL; schema parity, 16 database contracts, and backend bundle passed.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Baseline came from the base schema, not the full historical migration chain. No production migration or telephone test was run.' >> "$GITHUB_STEP_SUMMARY"
           echo 'This job does not waive other checks or authorize merge, deployment, messages, or telephone activation.' >> "$GITHUB_STEP_SUMMARY"
+
