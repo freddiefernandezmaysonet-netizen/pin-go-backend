@@ -57,6 +57,8 @@ jobs:
         run: node --import tsx --test src/services/guest-passcode-provision.service.test.ts
       - name: Read-only NFC diagnostics and error redaction
         run: node --import tsx --test src/services/internal-demo-nfc-diagnostics.test.ts
+      - name: Demo participant registration and bilingual invitation
+        run: node --import tsx --test src/services/internal-demo-real-precheckin.test.ts
   connected-commercial-demo:
     name: Same reservation commercial demonstration (PostgreSQL)
     runs-on: ubuntu-latest
