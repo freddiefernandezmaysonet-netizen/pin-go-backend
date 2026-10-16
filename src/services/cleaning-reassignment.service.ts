@@ -46,7 +46,10 @@ async function viable(tx: Prisma.TransactionClient, ctx: Context, assignment: { 
   const minutes = assignment.cleaningDurationCommitmentMinutes;
   if (minutes === null || !Number.isSafeInteger(minutes) || minutes < 15 || minutes > 1440 || bounds.earliestActualStart >= bounds.endsAt) return false;
   const finish = new Date(bounds.earliestActualStart.getTime() + minutes * 60000);
-  if (bounds.next && finish >= bounds.endsAt) return false;
+  // The Demo's own 30-minute cap is not the next guest's arrival boundary.
+  const exactDemoFit = ctx.reservation.source === "INTERNAL_DEMO_DIRECT_BOOKING" &&
+    finish.getTime() === bounds.endsAt.getTime() && bounds.next && bounds.next.checkIn > bounds.endsAt;
+  if (bounds.next && finish >= bounds.endsAt && !exactDemoFit) return false;
   const works = await tx.cleaningWork.findMany({ where: { staffMemberId: assignment.staffMemberId, reservationId: { not: ctx.reservation.id }, cancelledAt: null, supersededAt: null, completionConfirmedAt: null } });
   return !works.some(work => {
     const end = work.scheduledStartAt.getTime() + work.durationCommitmentMinutes * 60000;

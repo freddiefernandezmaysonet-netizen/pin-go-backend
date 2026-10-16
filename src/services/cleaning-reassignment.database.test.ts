@@ -14,6 +14,69 @@ if (databaseUrl) {
   const url = new URL(databaseUrl);
   if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.pathname !== "/cleaner_account_test") throw new Error("Use isolated loopback cleaner_account_test only");
 }
+test("Demo exact window fit preserves arrival and competing-work boundaries", { skip: !databaseUrl }, async t => {
+  const db = new PrismaClient({ datasources: { db: { url: databaseUrl! } } });
+  const org = `demo-exact-${randomUUID()}`;
+  await db.organization.create({ data: { id: org, name: "Synthetic Demo exact fit" } });
+  t.after(async () => {
+    const propertyIds = (await db.property.findMany({ where: { organizationId: org }, select: { id: true } })).map(p => p.id);
+    await db.operationalIssue.deleteMany({ where: { organizationId: org } });
+    await db.cleaningWork.deleteMany({ where: { propertyId: { in: propertyIds } } });
+    await db.cleaningConfirmation.deleteMany({ where: { propertyId: { in: propertyIds } } });
+    await db.reservation.deleteMany({ where: { property: { organizationId: org } } });
+    await db.propertyStaff.deleteMany({ where: { property: { organizationId: org } } });
+    await db.property.deleteMany({ where: { organizationId: org } });
+    await db.staffMember.deleteMany({ where: { organizationId: org } });
+    await db.organization.delete({ where: { id: org } });
+    await db.$disconnect();
+  });
+  const now = new Date();
+  const checkout = new Date(now.getTime() + 3600000);
+  const start = new Date(checkout.getTime() + 10 * 60000);
+  const end = new Date(start.getTime() + 30 * 60000);
+  for (const scenario of [
+    { name: "30 minutes fit Demo cap with arrival two days later", source: "INTERNAL_DEMO_DIRECT_BOOKING", duration: 30, nextOffset: 2880, allowed: true },
+    { name: "next arrival exactly at completion remains blocked", source: "INTERNAL_DEMO_DIRECT_BOOKING", duration: 30, nextOffset: 0, allowed: false },
+    { name: "earlier next arrival remains blocked", source: "INTERNAL_DEMO_DIRECT_BOOKING", duration: 30, nextOffset: -10, allowed: false },
+    { name: "31 minutes still exceed the Demo cap", source: "INTERNAL_DEMO_DIRECT_BOOKING", duration: 31, nextOffset: 2880, allowed: false },
+    { name: "commercial arrival boundary is unchanged", source: "DIRECT_BOOKING", duration: 30, nextOffset: 0, allowed: false },
+    { name: "unfinished started work still blocks Demo acceptance", source: "INTERNAL_DEMO_DIRECT_BOOKING", duration: 30, nextOffset: 2880, allowed: false, busy: true },
+  ]) await t.test(scenario.name, async () => {
+    const id = randomUUID();
+    await db.property.create({ data: { id, organizationId: org, name: "Synthetic property", status: "ACTIVE", cleaningStartOffsetMinutes: 10, cleaningDurationMinutes: 30 } });
+    await db.staffMember.create({ data: { id, organizationId: org, fullName: "Synthetic cleaner", phoneE164: "+12025550123" } });
+    await db.propertyStaff.create({ data: { propertyId: id, staffMemberId: id, role: "PRIMARY", cleaningDurationCommitmentMinutes: scenario.duration,
+      cleaningStartConfirmationGraceMinutes: 10, cleaningFollowupGraceMinutes: 15 } });
+    await db.reservation.create({ data: { id, propertyId: id, guestName: "Synthetic Demo", source: scenario.source, status: "ACTIVE",
+      checkIn: now, checkOut: checkout } });
+    const arrival = new Date(end.getTime() + scenario.nextOffset * 60000);
+    await db.reservation.create({ data: { propertyId: id, guestName: "Synthetic next arrival", status: "ACTIVE", checkIn: arrival,
+      checkOut: new Date(arrival.getTime() + 86400000) } });
+    if (scenario.busy) {
+      const prior = await db.reservation.create({ data: { propertyId: id, guestName: "Synthetic prior stay", status: "ACTIVE",
+        checkIn: new Date(now.getTime() - 172800000), checkOut: new Date(now.getTime() - 86400000) } });
+      await db.cleaningWork.create({ data: { propertyId: id, reservationId: prior.id, staffMemberId: id,
+        scheduledStartAt: new Date(now.getTime() - 86400000), startConfirmedAt: new Date(now.getTime() - 86400000),
+        durationCommitmentMinutes: 30, startConfirmationGraceMinutes: 10, followupGraceMinutes: 15 } });
+    }
+    await db.cleaningConfirmation.create({ data: { id, reservationId: id, propertyId: id, staffMemberId: id, token: randomUUID(), status: "PENDING" } });
+    const scope = { confirmationId: id, staffMemberId: id, organizationId: org };
+    if (scenario.allowed) {
+      assert.equal((await acceptCleaningOffer(db, scope, now)).replayed, false);
+      assert.equal((await acceptCleaningOffer(db, scope, now)).replayed, true);
+      const work = await db.cleaningWork.findFirstOrThrow({ where: { confirmationId: id } });
+      assert.equal(work.scheduledStartAt.getTime(), start.getTime());
+      assert.equal(work.durationCommitmentMinutes, 30);
+      assert.equal(work.timingConsentAcceptedAt, null);
+      assert.equal(work.startConfirmedAt, null);
+      assert.equal(await db.cleaningWork.count({ where: { confirmationId: id } }), 1);
+    } else {
+      await assert.rejects(acceptCleaningOffer(db, scope, now), /CLEANING_SCHEDULE_NOT_VIABLE/);
+      assert.equal((await db.cleaningConfirmation.findUniqueOrThrow({ where: { id } })).status, "PENDING");
+      assert.equal(await db.cleaningWork.count({ where: { confirmationId: id } }), 0);
+    }
+  });
+});
 test("explicit cancellation and sequential replacement in isolated SQL", { skip: !databaseUrl }, async t => {
   const db = new PrismaClient({ datasources: { db: { url: databaseUrl! } } });
   const id = `replacement-${randomUUID()}`;
