@@ -262,6 +262,10 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.ok("reservation" in preview);
     assert.equal(preview.reservation.reservationNumber, number); assert.equal((preview as any).demo.timezone, property.timezone);
     assert.equal(preview.cancellationAllowed, false);
+    assert.ok("demo" in preview);
+    assert.equal(preview.demo.identitySimulated, false);
+    assert.equal(preview.securePreCheckin.completed, false);
+    assert.ok(preview.securePreCheckin.url?.endsWith(token));
     await assert.rejects(cancelReservationFromGuestPortal({ guestToken: token }), /Commercial cancellation/);
     await assert.rejects(getGuestReservationModificationOptions({ guestToken: token }));
     await assert.rejects(refundDirectBookingReservation({ organizationId: org.id, reservationId }));
