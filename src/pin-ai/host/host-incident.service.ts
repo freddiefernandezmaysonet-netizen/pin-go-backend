@@ -175,3 +175,22 @@ export async function readPublishedIncidentUpdates(input: { prisma: PrismaClient
     nextAfter: rows.length === 100 ? rows[99]!.id : null,
   };
 }
+
+/** Acceptance metadata only; scoped to the current host and canonical incident. */
+export async function readHostIncidentReceipt(input: Input & { reference: string; requestId: string }) {
+  if (!/^[A-Za-z0-9_-]{16,100}$/.test(input.requestId)) return fail(400, "INVALID_REQUEST");
+  return input.prisma.$transaction(async tx => {
+    const { issue } = await scopedIssue(tx, input, input.reference);
+    const thread = await tx.pinAIHostIncidentThread.findUnique({ where: { issueId: issue.id } });
+    if (!thread) return { reference: input.reference, requestId: input.requestId, status: "UNCONFIRMED" as const };
+    if (thread.organizationId !== input.actor.orgId || thread.propertyId !== issue.propertyId || thread.reservationId !== issue.reservationId)
+      return fail(404, "NOT_FOUND");
+    const event = await tx.pinAIHostIncidentMessage.findFirst({ where: {
+      threadId: thread.id, requestId: input.requestId, actorId: input.actor.id,
+    }, select: { id: true, sequence: true, kind: true } });
+    // Absence does not prove the original command failed or permit resending.
+    return event ? { reference: input.reference, requestId: input.requestId, status: "ACCEPTED" as const,
+      eventId: event.id, version: event.sequence, operation: event.kind } :
+      { reference: input.reference, requestId: input.requestId, status: "UNCONFIRMED" as const };
+  });
+}
