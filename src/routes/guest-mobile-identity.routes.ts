@@ -1,3 +1,4 @@
+import { buildGuestMobilePinAIAvailabilityRouter } from "../guest-mobile/guest-mobile-pin-ai-availability.js";
 import { prepareMobileAccessOnDemand } from "../guest-mobile/mobile-access-on-demand.service.js";
 import { readGuestMobileAccessCodes } from "../guest-mobile/guest-mobile-access-code.service.js";
 import { deliverMobileAccessCredential } from "../guest-mobile/mobile-access-delivery.service.js";
@@ -29,6 +30,8 @@ const exchangeRateLimit: RequestHandler = (req, res, next) => {
 };
 
 export const guestMobileIdentityRouter = Router();
+guestMobileIdentityRouter.get("/api/guest-mobile/stays/:reservationNumber/pin-ai/availability", exchangeRateLimit);
+guestMobileIdentityRouter.use(buildGuestMobilePinAIAvailabilityRouter({ prisma }));
 
 guestMobileIdentityRouter.get(
   "/api/guest-mobile/stays/:reservationNumber/access-codes",
