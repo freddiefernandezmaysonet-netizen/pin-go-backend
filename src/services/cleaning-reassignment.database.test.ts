@@ -30,7 +30,8 @@ test("Demo exact window fit preserves arrival and competing-work boundaries", { 
     await db.organization.delete({ where: { id: org } });
     await db.$disconnect();
   });
-  const now = new Date();
+  // Fixed morning keeps the commercial scenario inside its standard arrival window.
+  const now = new Date("2026-10-16T12:00:00Z");
   const checkout = new Date(now.getTime() + 3600000);
   const start = new Date(checkout.getTime() + 10 * 60000);
   const end = new Date(start.getTime() + 30 * 60000);
