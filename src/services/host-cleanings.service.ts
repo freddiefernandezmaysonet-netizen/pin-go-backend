@@ -17,8 +17,8 @@ export type HostCleaningFilters = ReturnType<typeof parseHostCleaningFilters>;
 export async function listHostCleanings(db: PrismaClient, organizationId: string, filters: HostCleaningFilters, now = new Date()) {
   const state = Prisma.sql`CASE WHEN r.status = 'CANCELLED' THEN 'CANCELLED' WHEN w."completionConfirmedAt" IS NOT NULL THEN 'COMPLETED' WHEN w."cancelledAt" IS NOT NULL THEN 'CANCELLED' WHEN w."supersededAt" IS NOT NULL THEN 'REASSIGNED' WHEN w."startConfirmedAt" IS NOT NULL THEN 'IN_PROGRESS' ELSE c.status END`;
   const start = Prisma.sql`COALESCE(w."scheduledStartAt", r."checkOut" + p."cleaningStartOffsetMinutes" * interval '1 minute')`;
-  const localDay = Prisma.sql`(${start} AT TIME ZONE 'UTC' AT TIME ZONE p.timezone)::date`;
-  const today = Prisma.sql`(${now}::timestamptz AT TIME ZONE p.timezone)::date`;
+  const localDay = Prisma.sql`(${start} AT TIME ZONE 'UTC' AT TIME ZONE COALESCE(p.timezone, 'UTC'))::date`;
+  const today = Prisma.sql`(${now}::timestamptz AT TIME ZONE COALESCE(p.timezone, 'UTC'))::date`;
   const terminal = Prisma.sql`${state} IN ('COMPLETED', 'CANCELLED', 'DECLINED', 'REASSIGNED', 'EXPIRED')`;
   const clauses = [Prisma.sql`p."organizationId" = ${organizationId}`];
   if (filters.propertyId) clauses.push(Prisma.sql`p.id = ${filters.propertyId}`);
@@ -57,7 +57,7 @@ export async function listHostCleanings(db: PrismaClient, organizationId: string
     const work = works.find(w => w.confirmationId === id && w.reservationId === reservation.id && w.staffMemberId === cleaner.id);
     const status = reservation.status === "CANCELLED" ? "CANCELLED" : work?.completionConfirmedAt ? "COMPLETED" : work?.cancelledAt ? "CANCELLED" : work?.supersededAt ? "REASSIGNED" : work?.startConfirmedAt ? "IN_PROGRESS" : offer.status;
     const scheduledStartAt = work?.scheduledStartAt ?? new Date(reservation.checkOut.getTime() + property.cleaningStartOffsetMinutes * 60_000);
-    return [{ id, property: { id: property.id, name: property.name, timezone: property.timezone }, cleaner, reservation: { id: reservation.id, number: reservation.reservationNumber }, status,
+    return [{ id, property: { id: property.id, name: property.name, timezone: property.timezone ?? "UTC" }, cleaner, reservation: { id: reservation.id, number: reservation.reservationNumber }, status,
       scheduledStartAt, committedEndAt: work ? new Date(work.scheduledStartAt.getTime() + work.durationCommitmentMinutes * 60_000) : null,
       startedAt: work?.startConfirmedAt ?? null, completedAt: work?.completionConfirmedAt ?? null,
       actualDurationMinutes: work?.startConfirmedAt && work.completionConfirmedAt ? Math.max(0, Math.round((work.completionConfirmedAt.getTime() - work.startConfirmedAt.getTime()) / 60_000)) : null,

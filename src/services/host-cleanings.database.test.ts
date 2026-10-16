@@ -48,4 +48,7 @@ test("host timeline is tenant scoped, paginated after filtering, local-time corr
   assert.equal((await listHostCleanings(db, id, parseHostCleaningFilters({ view: "today" }), new Date("2026-10-08T05:00Z"))).items.length, 0);
   assert.equal((await listHostCleanings(db, id, parseHostCleaningFilters({ view: "all", status: "COMPLETED", reservationId: rid }), now)).items.length, 1);
   assert.equal((await listHostCleanings(db, id, parseHostCleaningFilters({ view: "all", staffMemberId: other }), now)).items.length, 0);
+  await db.property.update({ where: { id }, data: { timezone: null } });
+  const utc = await listHostCleanings(db, id, parseHostCleaningFilters({ view: "today", reservationId: rid }), now);
+  assert.equal(utc.items.length, 1); assert.equal(utc.items[0]?.property.timezone, "UTC");
 });
