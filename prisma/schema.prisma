@@ -3759,3 +3759,16 @@ model HostMobilePushDelivery {
   @@index([leaseUntil])
   @@index([organizationId, userId])
 }
+
+// Per-Host acknowledgement of an exact canonical guest message, never a thread watermark.
+model HostMobileMessageRead {
+  organizationId String
+  userId String
+  propertyId String
+  threadId String
+  messageId String
+  readAt DateTime @default(now())
+
+  @@id([organizationId, userId, propertyId, threadId, messageId], map: "HostMobileMessageRead_scope_key")
+  @@index([readAt])
+}

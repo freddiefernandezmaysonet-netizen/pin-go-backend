@@ -88,6 +88,9 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
           AND d."revokedAt" IS NULL AND d."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND d."projectId" = ${HOST_PUSH_PROJECT}
           AND u."isActive" = true AND u."role" IN ('ORG_ADMIN','ADMIN','PLATFORM_ADMIN')
           AND f."enabled" = true AND ${kindSql} = ANY(f."kinds")
+          ${messagesEnabled ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM "HostMobileMessageRead" r
+            WHERE r."organizationId" = i."organizationId" AND r."userId" = d."userId" AND r."propertyId" = i."propertyId"
+              AND r."threadId" = i."threadId" AND r."messageId" = i."messageId")` : Prisma.empty}
           AND NOT EXISTS (SELECT 1 FROM "HostMobilePushDelivery" o WHERE o."sourceId" = i."id"
             AND o."sourceEpoch" = i."reopenedCount" AND o."deviceId" = d."id" AND o."userId" = d."userId")
         ORDER BY i."lastSignalAt", i."id", d."id" LIMIT 100`);
@@ -135,6 +138,10 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
             source.propertyId !== delivery.propertyId || source.reopenedCount !== delivery.sourceEpoch || source.resolvedAt ||
             source.visibility !== 'HOST' || source.workflowState !== 'ACTION_REQUIRED' || !source.actionRequired || issueKind(source) !== delivery.kind)
           return null;
+        if (source.threadId && source.messageId && await tx.hostMobileMessageRead.findUnique({where: {
+          organizationId_userId_propertyId_threadId_messageId: {organizationId: delivery.organizationId, userId: delivery.userId,
+            propertyId: delivery.propertyId, threadId: source.threadId, messageId: source.messageId},
+        }})) return null;
         const session = await inspectBoundSession(tx as unknown as SessionEnforcementClient, {
           sessionId: delivery.sessionId, userId: user.id, organizationId: user.organizationId, tokenVersion: user.tokenVersion, now,
         });
@@ -157,6 +164,8 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
       // same preference revision. No human session activity is touched here.
       if (d.kind === 'GUEST_MESSAGE' && (!messagesEnabled || !snapshot.message || !snapshot.messageVerifiedAt)) return false;
       const messageFence = d.kind === 'GUEST_MESSAGE' ? Prisma.sql`
+        AND NOT EXISTS (SELECT 1 FROM "HostMobileMessageRead" r WHERE r."organizationId" = o."organizationId"
+          AND r."userId" = o."userId" AND r."propertyId" = o."propertyId" AND r."threadId" = i."threadId" AND r."messageId" = i."messageId")
         AND i."sourceRevision" = ${snapshot.message!.sourceRevision.toISOString().slice(0, -1)}::timestamp
         AND i."threadRevision" = ${snapshot.message!.threadRevision.toISOString().slice(0, -1)}::timestamp
         AND i."threadId" = ${snapshot.message!.threadId} AND i."messageId" = ${snapshot.message!.messageId}

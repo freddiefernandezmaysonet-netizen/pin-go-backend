@@ -8,6 +8,8 @@ import { guardAuthenticatedSession } from "../auth/session-request-guard.js";
 import { prisma } from "../lib/prisma.js";
 import { readMobileReplyReceipt } from "../channex-messaging/mobile-reply-receipt.js";
 
+import {createMobileMessageReads, messageReadInput} from "../channex-messaging/mobile-message-read.js";
+
 type Runtime = NonNullable<ReturnType<typeof buildHostInboxRuntime>>;
 type HostRequest = Request & { user?: AuthenticatedUser };
 const HOST_ROLES = new Set(["ORG_ADMIN", "ADMIN", "PLATFORM_ADMIN"]);
@@ -23,8 +25,8 @@ function failure(res: Response, error: unknown) {
   const known = error instanceof InboxError;
   return res.status(known ? error.status : 503).json({ ok: false, error: known ? error.code : "HOST_INBOX_UNAVAILABLE" });
 }
-async function nativeAuthorization(req: HostRequest) {
-  await authorizeMobileReply({ enabled: process.env.HOST_MOBILE_REPLY_ENABLED === "true",
+async function nativeAuthorization(req: HostRequest, enabled = process.env.HOST_MOBILE_REPLY_ENABLED === "true") {
+  await authorizeMobileReply({ enabled,
     authorization: req.get("authorization"), origin: req.get("origin"), cookie: req.get("cookie"), identity: req.user }, {
     verify: verifySessionBoundAuthToken,
     guard: input => guardAuthenticatedSession(prisma as any, input),
@@ -49,6 +51,32 @@ export function buildDashboardChannexHostInboxRouter(args: {
     catch (error) { return failure(res, error); }
   });
   const path = `${prefix}/properties/:propertyId/threads`;
+  const readScope = (req: HostRequest) => ({organizationId: req.user!.orgId, userId: req.user!.id,
+    propertyId: req.params.propertyId!, threadId: req.params.threadId!});
+  const readAuthorization = async (req: HostRequest) => {
+    if (process.env.HOST_MOBILE_MESSAGE_READ_ENABLED !== "true") throw new InboxError("HOST_MESSAGE_READ_DISABLED", 503);
+    await nativeAuthorization(req, true);
+  };
+  router.get(`${path}/:threadId/mobile-messages`, async (req: HostRequest, res) => {
+    try {
+      await readAuthorization(req);
+      const scope = readScope(req), pagination = page(req);
+      if (pagination.limit !== 25) throw new InboxError("HOST_MESSAGE_READ_INVALID", 400);
+      const history = await args.runtime!.messages(scope, scope.threadId, pagination);
+      await readAuthorization(req);
+      return res.json({ok: true, ...history, readStateEnabled: true,
+        items: await createMobileMessageReads(prisma).decorate(scope, history.items)});
+    } catch (error) { return failure(res, error); }
+  });
+  router.post(`${path}/:threadId/mobile-read`, async (req: HostRequest, res) => {
+    try {
+      await readAuthorization(req);
+      const scope = readScope(req), input = messageReadInput(req.body);
+      const history = await args.runtime!.messages(scope, scope.threadId, {page: input.page, limit: 25});
+      await readAuthorization(req);
+      return res.json({ok: true, ...await createMobileMessageReads(prisma).mark(scope, input.messageId, history.items)});
+    } catch (error) { return failure(res, error); }
+  });
   router.get(`${path}/:threadId/mobile-receipt`, async (req: HostRequest, res) => {
     try {
       await nativeAuthorization(req);

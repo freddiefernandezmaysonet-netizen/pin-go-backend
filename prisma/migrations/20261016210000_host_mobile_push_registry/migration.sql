@@ -39,3 +39,11 @@ CREATE UNIQUE INDEX "HostMobilePushDelivery_source_device_user_key"
 CREATE INDEX "HostMobilePushDelivery_state_availableAt_idx" ON "HostMobilePushDelivery"("state", "availableAt");
 CREATE INDEX "HostMobilePushDelivery_leaseUntil_idx" ON "HostMobilePushDelivery"("leaseUntil");
 CREATE INDEX "HostMobilePushDelivery_organizationId_userId_idx" ON "HostMobilePushDelivery"("organizationId", "userId");
+-- Exact per-Host message acknowledgement. No message content or guest read receipt.
+CREATE TABLE "HostMobileMessageRead" (
+  "organizationId" TEXT NOT NULL, "userId" TEXT NOT NULL, "propertyId" TEXT NOT NULL,
+  "threadId" TEXT NOT NULL, "messageId" TEXT NOT NULL,
+  "readAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "HostMobileMessageRead_scope_key" PRIMARY KEY ("organizationId", "userId", "propertyId", "threadId", "messageId")
+);
+CREATE INDEX "HostMobileMessageRead_readAt_idx" ON "HostMobileMessageRead"("readAt");

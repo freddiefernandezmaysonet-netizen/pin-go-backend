@@ -6,7 +6,7 @@ This extends the unmerged PR472 registry with a metadata-only PostgreSQL deliver
 
 The producer reads current OperationalIssue rows that are HOST-visible, ACTION_REQUIRED, actionRequired and unresolved, with an active property and an opted-in Host device. Supported sources are the canonical PIN_AI_GUEST_INCIDENT engine, CLEANING targets and ACCESS targets. A single source episode (`reopenedCount`) creates at most one ledger row per device/user. Repeated source updates, multiple producers and process restarts cannot create a second row for that episode. A genuinely reopened case can create a new alert. The original queued event expires after 24 hours; later source signals do not renew that queued alert's expiry.
 
-GUEST_MESSAGE now has a separately disabled producer for canonical ChannexAIInbound NEEDS_HOST records whose thread is HUMAN, not sending and not leased. A namespaced inbound identity creates at most one row per message/device/user. A MESSAGING operational issue remains excluded: an outbound communications failure is not an inbound guest message. This coverage follows the existing automatic-inbox ingestion/escalation flow; it does not cover all inbox traffic or provide read/unread tracking.
+GUEST_MESSAGE now has a separately disabled producer for canonical ChannexAIInbound NEEDS_HOST records whose thread is HUMAN, not sending and not leased. A namespaced inbound identity creates at most one row per message/device/user. A MESSAGING operational issue remains excluded: an outbound communications failure is not an inbound guest message. This coverage follows the existing automatic-inbox ingestion/escalation flow; it does not cover all inbox traffic or infer whether a Host has read a message. Exact per-Host read receipts are described below.
 
 The delivery process requires all of:
 
@@ -26,7 +26,15 @@ The adapter reuses the canonical inbox parser/transport behind a GET-only wrappe
 
 After that external read, the process re-reads local session/user/property/device/preference authority. Source and thread revisions must still match. The atomic SENDING boundary requires fresh local policy and external evidence under five seconds old, current NEEDS_HOST/HUMAN state and no active responder lease/send. No provider call occurs within a database transaction. Channex can change immediately after the read; this is a freshness check, not a distributed atomic lock or a claim that the guest message is unread. The Host app reauthorizes its normal Messages destination after a tap.
 
-No text, attachments, thread title or remote error body enters the notification ledger/payload/log. The message alert is generic English with INFO severity and cannot bypass quiet hours. These sources are read only: existing Channex responders, controls, receipts, webhooks and migrations are unchanged. General non-AI inbound ingestion and per-Host read state remain separate work.
+No text, attachments, thread title or remote error body enters the notification ledger/payload/log. The message alert is generic English with INFO severity and cannot bypass quiet hours. These sources are read only: existing Channex responders, controls, receipts, webhooks and migrations are unchanged. General non-AI inbound ingestion remains separate work.
+
+## Per-Host exact-message read receipts — disabled
+
+The separate `HOST_MOBILE_MESSAGE_READ_ENABLED=true` gate enables native GET `.../threads/:threadId/mobile-messages` and POST `.../threads/:threadId/mobile-read`. The POST accepts only `{messageId, page}` and re-fetches that canonical page (25 items) through the existing scoped inbox runtime. Only an exact visible guest message can be acknowledged. Current signed native session authorization is enforced before and after the external read. Browser Origin/cookie requests, supplied actor IDs, timestamps and bulk watermarks are rejected.
+
+Host PR7 adds a separate default-off `EXPO_PUBLIC_HOST_MESSAGE_READ_ENABLED` capability. A Host explicitly selects **Mark as read** for a displayed guest message. Loading a page or tapping a push does not acknowledge unread content. The client binds reads and acknowledgements to the same captured session, aborts on background/unmount, rejects late/account-changed confirmations, and displays Read only after a matching server confirmation. An uncertain response can be recovered by Refresh; no automatic retry occurs.
+
+The additive HostMobileMessageRead table stores only the organization/user/property/thread/message identity and the first acknowledgement time. Concurrent marks are idempotent. No guest/provider read receipt is sent and no conversation ownership/action state changes. This is per-message state on the viewed page, not a whole-inbox unread count. New/off-page messages and other Hosts remain unread. The push producer, current-policy read and atomic send predicate all suppress a message acknowledged by that recipient. A push already sent cannot be withdrawn. Read receipts are conservatively retained; retention review remains a release gate.
 
 ## Durable states and provider uncertainty
 
@@ -46,7 +54,7 @@ The token reader verifies the exact Host EAS project/platform, strict versioned 
 
 DeviceNotRegistered from a ticket or receipt retires only the exact original device/user/session/update-time/monotonic-version binding, transactionally with that delivery result. A delayed receipt cannot revoke a subsequently registered replacement. Receipt checks can finish after logout or source resolution because they only reconcile an already-sent attempt and cannot send another notification.
 
-The draft registry SQL now creates three additive tables, including HostMobilePushDelivery. This migration remains unapplied outside disposable tests. The ledger uses scalar source/device/user references intentionally: current reads are authoritative, and deletion cannot turn historical metadata into access. Maintenance retains active-source deduplication records and unresolved UNKNOWN outcomes; these are not subject to unconditional age-based deletion.
+The draft registry SQL now creates four additive tables, including HostMobilePushDelivery. This migration remains unapplied outside disposable tests. The ledger uses scalar source/device/user references intentionally: current reads are authoritative, and deletion cannot turn historical metadata into access. Maintenance retains active-source deduplication records and unresolved UNKNOWN outcomes; these are not subject to unconditional age-based deletion.
 
 ## Independent maintenance candidate — disabled
 
@@ -64,10 +72,12 @@ Unit tests cover encryption/key versions/tampering, fixed provider transport, ti
 
 Local validation: 20 push unit tests pass, seven scope-verifier tests pass, strict type checks/emitted builds and Prisma validation pass. All ten database scenarios (eleven Node test results including their parent) pass through a disposable PGlite/PostgreSQL-WASM mirror, including a non-UTC database session. The unchanged base schema plus the actual candidate SQL has zero schema differences against the candidate datamodel. This serializing local mirror validates SQL and state behavior; native PostgreSQL CI is still required for real concurrent-lock certification. The broader local Host command passes 45 tests and skips four native PostgreSQL suites when no database flag is set.
 
-Still required: current-head native PostgreSQL/CI evidence; general non-AI inbound coverage and per-Host read-state integration; operational handling of UNKNOWN/provider credential failures; maintenance volume/query-plan review; provider credential and APNs/FCM readiness review; explicit controlled backend availability; physical iOS/Android permission, foreground/background/cold-tap, quiet-hour, logout/account-switch and delivery tests. Keep both PRs Draft. No merge, deployment, activation or store build is included.
+Still required: current-head native PostgreSQL/CI evidence; general non-AI inbound coverage and whole-inbox unread summaries; operational handling of UNKNOWN/provider credential failures; maintenance volume/query-plan review; provider credential and APNs/FCM readiness review; explicit controlled backend availability; physical iOS/Android permission, foreground/background/cold-tap, quiet-hour, logout/account-switch and delivery tests. Keep both PRs Draft. No merge, deployment, activation or store build is included.
 
 Provider contract checked 2026-10-17: https://docs.expo.dev/push-notifications/sending-notifications/ (single-message ticket/receipt formats, DeviceNotRegistered, 15-minute receipt check, 24-hour receipt retention, enhanced push security and finite expiration).
 
 Previous-head evidence: all 44 workflows passed at `a16f29031af71128505c090baa44460b9f463ba3`, including 50 Host unit/native PostgreSQL results. That evidence predates this maintenance addition; the new head requires its own CI certification.
 
 Previous maintenance-head evidence: all 44 workflows passed at `778a4651959248c974966a9ffa7acf89efef346c`, including 52 Host unit/native PostgreSQL results. The inbound addition requires new exact-head CI evidence.
+
+Read-state addition: local signed HTTP tests and isolated SQL tests verify actor isolation, exact-message idempotence, session revocation after external reads and suppression at the send boundary. Its exact-head CI evidence is recorded in the draft PR.

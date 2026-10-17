@@ -206,6 +206,16 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       fresh.messageVerifiedAt = new Date(Date.now() - 6000);
       assert.equal(await messages.arm(row, fresh), false, 'external evidence expires after five seconds');
       fresh.messageVerifiedAt = new Date();
+      const readKey = {organizationId: org.id, userId: user.id, propertyId: property.id, threadId, messageId};
+      await db.hostMobileMessageRead.create({data: {...readKey, userId: 'another-host'}});
+      assert.ok(await messages.current(row), 'another Host reading cannot suppress this recipient');
+      await Promise.all(Array.from({length: 4}, () => db.hostMobileMessageRead.upsert({
+        where: {organizationId_userId_propertyId_threadId_messageId: readKey}, create: readKey, update: {},
+      })));
+      assert.equal(await db.hostMobileMessageRead.count({where: readKey}), 1);
+      assert.equal(await messages.current(row), null);
+      assert.equal(await messages.arm(row, fresh), false, 'reading after verification cancels the pending send');
+      await db.hostMobileMessageRead.deleteMany({where: {organizationId: org.id}});
       assert.equal(await messages.arm(row, fresh), true);
       assert.equal(await messages.finish(row, {state: 'UNKNOWN', code: 'SYNTHETIC'}), true);
       assert.equal(await enqueueMessages(), 0);
@@ -246,6 +256,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       await clear();
     });
   } finally {
+    await db.hostMobileMessageRead.deleteMany({where: {organizationId: org.id}});
     await db.channexAIInbound.deleteMany({where: {organizationId: org.id}});
     await db.channexAIThread.deleteMany({where: {organizationId: org.id}});
     await clear(); await db.authSession.deleteMany({where: {organizationId: org.id}});

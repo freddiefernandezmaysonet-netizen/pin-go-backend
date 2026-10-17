@@ -28,8 +28,18 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     receiptReads.push(args);
     return { status: 'SENT', response: { id: '11111111-1111-4111-8111-111111111111' } };
   };
+  const messageId = '11111111-1111-4111-8111-111111111111';
+  let revokeDuringRead = false; const readWrites = [];
+  const readFind = prisma.hostMobileMessageRead.findMany, readWrite = prisma.hostMobileMessageRead.upsert;
+  t.after(() => {prisma.hostMobileMessageRead.findMany = readFind; prisma.hostMobileMessageRead.upsert = readWrite; delete process.env.HOST_MOBILE_MESSAGE_READ_ENABLED;});
+  prisma.hostMobileMessageRead.findMany = async () => readWrites.map(() => ({messageId}));
+  prisma.hostMobileMessageRead.upsert = async args => {readWrites.push(args); return {...args.create, readAt: new Date()};};
   const app = express(); app.use(express.json());
-  app.use(buildDashboardChannexHostInboxRouter({ runtime: { async reply(input) { calls.push(input); return { message: { id: 'synthetic' } }; } }, isTrustedOrigin: async () => false }));
+  app.use(buildDashboardChannexHostInboxRouter({ runtime: { async messages(scope, threadId, page) {
+    assert.equal(scope.organizationId, 'org'); assert.equal(scope.userId, 'host');
+    if (revokeDuringRead) revoked = true;
+    return {items: [{id: messageId, sender: 'guest'}], thread: {id: threadId}, ...page, total: 1};
+  }, async reply(input) { calls.push(input); return { message: { id: 'synthetic' } }; } }, isTrustedOrigin: async () => false }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const token = signSessionBoundAuthToken({ sub: 'host', orgId: 'org', email: 'test@example.invalid', role: 'ORG_ADMIN', tokenVersion: 2 }, 'session');
@@ -40,6 +50,25 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     return { status: result.status, body: await result.json() };
   }
   try {
+    const readUrl = `http://127.0.0.1:${server.address().port}/api/dashboard/channex-messages/properties/local/threads/${messageId}`;
+    const readHeaders = {authorization: `Bearer ${token}`, 'content-type': 'application/json', connection: 'close'};
+    const markRead = async (body = {messageId, page: 1}, extra = {}) => {
+      const response = await fetch(readUrl + '/mobile-read', {method: 'POST', headers: {...readHeaders, ...extra}, body: JSON.stringify(body)});
+      await response.json(); return response.status;
+    };
+    assert.equal(await markRead(), 503); assert.equal(readWrites.length, 0);
+    process.env.HOST_MOBILE_MESSAGE_READ_ENABLED = 'true';
+    assert.equal(await markRead({messageId, page: 1, userId: 'other'}), 400);
+    assert.equal(await markRead({messageId: '22222222-2222-4222-8222-222222222222', page: 1}), 409);
+    assert.equal(await markRead(undefined, {origin: 'https://app.pin-ngo.com'}), 403);
+    assert.equal(await markRead(undefined, {cookie: 'unexpected=1'}), 403);
+    revokeDuringRead = true;
+    assert.equal(await markRead(), 401); assert.equal(readWrites.length, 0);
+    revokeDuringRead = false; revoked = false;
+    assert.equal(await markRead(), 200); assert.equal(readWrites.length, 1);
+    assert.equal(readWrites[0].create.userId, 'host'); assert.equal(readWrites[0].create.organizationId, 'org');
+    const readResult = await fetch(readUrl + '/mobile-messages?page=1&limit=25', {headers: readHeaders});
+    assert.equal(readResult.status, 200); assert.equal((await readResult.json()).items[0].read, true);
     const receiptUrl = `http://127.0.0.1:${server.address().port}/api/dashboard/channex-messages/properties/local/threads/11111111-1111-4111-8111-111111111111/mobile-receipt`;
     const receiptHeaders = { authorization: `Bearer ${token}`, 'idempotency-key': 'synthetic-key-123', connection: 'close' };
     const receipt = await fetch(receiptUrl, { headers: receiptHeaders });
