@@ -77,3 +77,12 @@ test('provider exceptions after the durable send boundary become unknown', async
   const f = await fixture(); f.provider.send = async () => {throw Error('PRIVATE');}; await f.run();
   assert.equal(f.results[0].state, 'UNKNOWN'); assert.equal(JSON.stringify(f.results).includes('PRIVATE'), false);
 });
+
+test('maintenance stays independent, disabled by default and rejects missing or broad tenant scope', async () => {
+  const {runMaintenance} = await import('../workers/host-mobile-push.worker.js');
+  assert.deepEqual(await runMaintenance(env), {enabled: false, deliveriesDeleted: 0, devicesDeleted: 0});
+  for (const ids of [undefined, 'null', '[]', '["org","org"]', '["*"]', '[1]', '{']) {
+    await assert.rejects(runMaintenance({HOST_MOBILE_PUSH_MAINTENANCE_ENABLED: 'true',
+      HOST_MOBILE_PUSH_MAINTENANCE_ORGANIZATION_IDS: ids}), /MAINTENANCE_CONFIG_INVALID/);
+  }
+});

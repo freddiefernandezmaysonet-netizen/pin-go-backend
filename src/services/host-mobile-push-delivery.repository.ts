@@ -183,3 +183,35 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
     },
   };
 }
+
+// Separate, explicitly invoked maintenance. It cannot enqueue, claim or send.
+export async function maintainHostPushRecords(db: PrismaClient, organizationIds: readonly string[]) {
+  if (!organizationIds.length) return {deliveriesDeleted: 0, devicesDeleted: 0};
+  return db.$transaction(async tx => {
+    await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '5s'");
+    // Preserve the deduplication identity while its canonical source exists,
+    // including resolved cases that may receive another signal. UNKNOWN is
+    // evidence awaiting reconciliation and is never automatically deleted.
+    const deliveriesDeleted = await tx.$executeRaw(Prisma.sql`WITH obsolete AS (
+      SELECT o."id" FROM "HostMobilePushDelivery" o
+      WHERE o."organizationId" IN (${Prisma.join([...organizationIds])})
+        AND o."state" IN ('PROVIDER_ACCEPTED','FAILED','SKIPPED')
+        AND o."updatedAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
+        AND o."expiresAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
+        AND o."leaseOwner" IS NULL AND o."leaseUntil" IS NULL
+        AND NOT EXISTS (SELECT 1 FROM "OperationalIssue" i WHERE i."id" = o."sourceId")
+      ORDER BY o."updatedAt", o."id" FOR UPDATE OF o SKIP LOCKED LIMIT 500
+    ) DELETE FROM "HostMobilePushDelivery" o USING obsolete x WHERE o."id" = x."id"`);
+    // Registration and deletion lock the same device row. A renewed binding
+    // cannot qualify on a stale snapshot. Never delete merely idle live devices.
+    const devicesDeleted = await tx.$executeRaw(Prisma.sql`WITH obsolete AS (
+      SELECT d."id" FROM "HostMobilePushDevice" d
+      WHERE d."organizationId" IN (${Prisma.join([...organizationIds])})
+        AND d."updatedAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
+        AND (d."expiresAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
+          OR d."revokedAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days')
+      ORDER BY d."updatedAt", d."id" FOR UPDATE OF d SKIP LOCKED LIMIT 500
+    ) DELETE FROM "HostMobilePushDevice" d USING obsolete x WHERE d."id" = x."id"`);
+    return {deliveriesDeleted, devicesDeleted};
+  }, {timeout: 10_000});
+}

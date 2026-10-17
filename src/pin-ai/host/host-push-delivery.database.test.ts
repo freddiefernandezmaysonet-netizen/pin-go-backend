@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {PrismaClient} from '@prisma/client';
 import {createHostPushRegistry} from '../../services/host-mobile-notification.registry.js';
-import {createHostPushDeliveryRepository} from '../../services/host-mobile-push-delivery.repository.js';
+import {createHostPushDeliveryRepository, maintainHostPushRecords} from '../../services/host-mobile-push-delivery.repository.js';
 import {runHostPushDeliveryCycle} from '../../services/host-mobile-push-delivery.service.js';
 import {HOST_PUSH_PROJECT} from '../../services/host-mobile-push-token.js';
 
@@ -170,6 +170,36 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       await repository.recover(); assert.equal((await db.hostMobilePushDelivery.findUniqueOrThrow({where: {id: row.id}})).state, 'UNKNOWN');
       assert.equal(await repository.claim('SEND', 'cannot-replay'), null);
       assert.equal((await db.authSession.findUniqueOrThrow({where: {id: session.id}})).lastActivityAt.getTime(), session.lastActivityAt.getTime());
+      await clear();
+    });
+    await t.test('bounded maintenance preserves live identities, uncertain sends, pending receipts and tenant isolation', async () => {
+      await issue(); await enqueue();
+      const original = await db.hostMobilePushDelivery.findFirstOrThrow({where: {organizationId: org.id}});
+      const old = new Date(Date.now() - 31 * 86400000);
+      const aged = {...original, state: 'FAILED', expiresAt: old, updatedAt: old};
+      await db.hostMobilePushDelivery.update({where: {id: original.id}, data: {state: 'FAILED', expiresAt: old, updatedAt: old}});
+      const protectedRows = ['UNKNOWN', 'ACCEPTED', 'CHECKING', 'SENDING', 'CLAIMED', 'QUEUED'].map(state =>
+        ({...aged, id: randomUUID(), sourceId: randomUUID(), state}));
+      protectedRows.push({...aged, id: randomUUID(), sourceId: randomUUID(), state: 'FAILED', updatedAt: new Date()});
+      protectedRows.push({...aged, id: randomUUID(), sourceId: randomUUID(), state: 'FAILED', organizationId: other.id});
+      await db.hostMobilePushDelivery.createMany({data: protectedRows});
+      await db.hostMobilePushDelivery.createMany({data: Array.from({length: 501}, (_, n) =>
+        ({...aged, id: randomUUID(), sourceId: randomUUID(), state: ['FAILED','SKIPPED','PROVIDER_ACCEPTED'][n % 3]}))});
+      const activeDevice = await db.hostMobilePushDevice.findUniqueOrThrow({where: {id: device.id}});
+      const expiredDevice = {...activeDevice, id: randomUUID(), tokenHash: randomUUID(), expiresAt: old, updatedAt: old};
+      const renewedDevice = {...expiredDevice, id: randomUUID(), tokenHash: randomUUID(), updatedAt: new Date()};
+      await db.hostMobilePushDevice.createMany({data: [expiredDevice, renewedDevice]});
+      assert.deepEqual(await maintainHostPushRecords(db, []), {deliveriesDeleted: 0, devicesDeleted: 0});
+      assert.deepEqual(await maintainHostPushRecords(db, [org.id]), {deliveriesDeleted: 500, devicesDeleted: 1});
+      const concurrent = await Promise.all([maintainHostPushRecords(db, [org.id]), maintainHostPushRecords(db, [org.id])]);
+      assert.equal(concurrent.reduce((sum, r) => sum + r.deliveriesDeleted, 0), 1);
+      assert.equal(await db.hostMobilePushDelivery.count({where: {id: {in: [original.id, ...protectedRows.map(r => r.id)]}}}), 9);
+      assert.ok(await db.hostMobilePushDevice.findUnique({where: {id: renewedDevice.id}}));
+      assert.ok(await db.hostMobilePushDevice.findUnique({where: {id: device.id}}));
+      // A fresh signal cannot rematerialize a retained source episode.
+      assert.equal(await enqueue(), 0, 'retained identity prevents duplicate notification');
+      await db.hostMobilePushDevice.deleteMany({where: {id: {in: [expiredDevice.id, renewedDevice.id]}}});
+      await db.hostMobilePushDelivery.deleteMany({where: {organizationId: other.id}});
       await clear();
     });
   } finally {
