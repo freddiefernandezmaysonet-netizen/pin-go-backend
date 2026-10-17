@@ -8,6 +8,8 @@ import type {HostAttentionEvent, HostAttentionKind, HostPushPreference, HostPush
 export type Delivery = HostMobilePushDelivery;
 export type PushSnapshot = {
   event: HostAttentionEvent; recipient: HostPushRecipient; preference: HostPushPreference;
+  message?: {threadId: string; messageId: string; sourceRevision: Date; threadRevision: Date};
+  messageVerifiedAt?: Date;
   preferenceRevision: number; device: EncryptedHostPushDevice; checkedAt: Date;
 };
 export type DeliveryFinish = {
@@ -23,10 +25,11 @@ export type HostPushDeliveryRepository = {
   finish(delivery: Delivery, outcome: DeliveryFinish): Promise<boolean>;
 };
 
-const kindSql = Prisma.sql`CASE WHEN i."engine" = 'PIN_AI_GUEST_INCIDENT' THEN 'GUEST_INCIDENT'
+const kindSql = Prisma.sql`CASE WHEN i."engine" = 'HOST_PUSH_INBOUND' THEN 'GUEST_MESSAGE' WHEN i."engine" = 'PIN_AI_GUEST_INCIDENT' THEN 'GUEST_INCIDENT'
   WHEN i."actionTarget" = 'CLEANING' THEN 'CLEANING_EXCEPTION'
   WHEN i."actionTarget" = 'ACCESS' THEN 'ACCESS_EXCEPTION' ELSE NULL END`;
 function issueKind(source: {engine: string; actionTarget: string}): HostAttentionKind | null {
+  if (source.engine === 'HOST_PUSH_INBOUND') return 'GUEST_MESSAGE';
   if (source.engine === 'PIN_AI_GUEST_INCIDENT') return 'GUEST_INCIDENT';
   if (source.actionTarget === 'CLEANING') return 'CLEANING_EXCEPTION';
   if (source.actionTarget === 'ACCESS') return 'ACCESS_EXCEPTION';
@@ -34,7 +37,24 @@ function issueKind(source: {engine: string; actionTarget: string}): HostAttentio
   return null;
 }
 
-export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeliveryRepository {
+// Normalize only canonical NEEDS_HOST inputs; no outbound failure is a message.
+// This optional view is never queried when inbound push is disabled.
+function attentionSources(messagesEnabled: boolean) {
+  const issues = Prisma.sql`SELECT "id", "reopenedCount", "organizationId", "propertyId", "engine", "actionTarget"::text,
+    "visibility"::text, "workflowState"::text, "actionRequired", "resolvedAt", "severity"::text, "lastSignalAt",
+    NULL::text AS "threadId", NULL::text AS "messageId", NULL::timestamp AS "sourceRevision", NULL::timestamp AS "threadRevision"
+    FROM "OperationalIssue"`;
+  if (!messagesEnabled) return Prisma.sql`(${issues})`;
+  return Prisma.sql`(${issues} UNION ALL SELECT 'inbound:' || m."id", 0, m."organizationId", m."propertyId",
+    'HOST_PUSH_INBOUND', 'MESSAGING', 'HOST', 'ACTION_REQUIRED', true, NULL::timestamp, 'INFO', m."receivedAt",
+    m."threadId", m."messageId", m."updatedAt", t."updatedAt"
+    FROM "ChannexAIInbound" m JOIN "ChannexAIThread" t ON t."organizationId" = m."organizationId"
+      AND t."propertyId" = m."propertyId" AND t."threadId" = m."threadId"
+    WHERE m."status" = 'NEEDS_HOST' AND t."mode" = 'HUMAN' AND t."sending" = false
+      AND m."leaseToken" IS NULL AND t."leaseToken" IS NULL)`;
+}
+export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabled = false): HostPushDeliveryRepository {
+  const sources = attentionSources(messagesEnabled);
   return {
     async recover() {
       // A process may die on either side of the network boundary. Only a claim
@@ -56,7 +76,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
         SELECT i."id" AS "sourceId", i."reopenedCount" AS "sourceEpoch", i."organizationId", i."propertyId",
           d."userId", d."sessionId", d."id" AS "deviceId", d."updatedAt" AS "deviceUpdatedAt", d."bindingVersion" AS "deviceBindingVersion",
           ${kindSql} AS "kind", i."lastSignalAt" AS "occurredAt"
-        FROM "OperationalIssue" i
+        FROM ${sources} i
         JOIN "Property" p ON p."id" = i."propertyId" AND p."organizationId" = i."organizationId" AND p."status" = 'ACTIVE'
         JOIN "HostMobilePushDevice" d ON d."organizationId" = i."organizationId"
         JOIN "DashboardUser" u ON u."id" = d."userId" AND u."organizationId" = d."organizationId"
@@ -99,8 +119,11 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
         const [device, user, source, preference, property] = await Promise.all([
           tx.hostMobilePushDevice.findUnique({where: {id: delivery.deviceId}}),
           tx.dashboardUser.findUnique({where: {id: delivery.userId}}),
-          tx.operationalIssue.findUnique({where: {id: delivery.sourceId}, select: {id: true, organizationId: true, propertyId: true,
-            engine: true, actionTarget: true, visibility: true, workflowState: true, actionRequired: true, resolvedAt: true, reopenedCount: true, severity: true}}),
+          tx.$queryRaw<Array<{organizationId: string; propertyId: string; engine: string; actionTarget: string;
+            visibility: string; workflowState: string; actionRequired: boolean; resolvedAt: Date | null; reopenedCount: number;
+            severity: 'INFO' | 'WARNING' | 'CRITICAL'; threadId: string | null; messageId: string | null;
+            sourceRevision: Date; threadRevision: Date}>>(Prisma.sql`SELECT * FROM ${sources} i WHERE i."id" = ${delivery.sourceId}`)
+            .then(rows => rows.length === 1 ? rows[0] : null),
           tx.hostMobilePushPreference.findUnique({where: {userId: delivery.userId}}),
           tx.property.findFirst({where: {id: delivery.propertyId, organizationId: delivery.organizationId, status: 'ACTIVE'}, select: {id: true}}),
         ]);
@@ -122,6 +145,8 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
           recipient: {userId: user.id, organizationId: user.organizationId, role: user.role, activeSession: true, allowedPropertyIds: [property.id]},
           preference: {enabled: preference.enabled, kinds: preference.kinds as HostAttentionKind[], timezone: preference.timezone,
             quietHours: preference.quietStartHour === null ? null : {startHour: preference.quietStartHour, endHour: preference.quietEndHour!, allowCritical: preference.allowCritical}},
+          ...(source.threadId && source.messageId ? {message: {threadId: source.threadId, messageId: source.messageId,
+            sourceRevision: source.sourceRevision, threadRevision: source.threadRevision}} : {}),
           preferenceRevision: preference.revision, device, checkedAt: now,
         };
       }, {isolationLevel: 'RepeatableRead', timeout: 10_000});
@@ -130,6 +155,14 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
       // Repeat critical authorization predicates at the durable network boundary.
       // The canonical policy snapshot must be under five seconds old, with the
       // same preference revision. No human session activity is touched here.
+      if (d.kind === 'GUEST_MESSAGE' && (!messagesEnabled || !snapshot.message || !snapshot.messageVerifiedAt)) return false;
+      const messageFence = d.kind === 'GUEST_MESSAGE' ? Prisma.sql`
+        AND i."sourceRevision" = ${snapshot.message!.sourceRevision.toISOString().slice(0, -1)}::timestamp
+        AND i."threadRevision" = ${snapshot.message!.threadRevision.toISOString().slice(0, -1)}::timestamp
+        AND i."threadId" = ${snapshot.message!.threadId} AND i."messageId" = ${snapshot.message!.messageId}
+        AND ${snapshot.messageVerifiedAt!.toISOString().slice(0, -1)}::timestamp <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+        AND ${snapshot.messageVerifiedAt!.toISOString().slice(0, -1)}::timestamp > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '5 seconds'
+      ` : Prisma.empty;
       const count = await db.$executeRaw`UPDATE "HostMobilePushDelivery" o
         SET "state" = 'SENDING', "attempts" = "attempts" + 1, "updatedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
         WHERE o."id" = ${d.id} AND o."state" = 'CLAIMED' AND o."leaseOwner" = ${d.leaseOwner}
@@ -140,7 +173,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
             JOIN "AuthSession" s ON s."id" = v."sessionId" AND s."userId" = u."id" AND s."organizationId" = u."organizationId"
             JOIN "HostMobilePushPreference" f ON f."userId" = u."id" AND f."organizationId" = u."organizationId"
             JOIN "Property" p ON p."id" = o."propertyId" AND p."organizationId" = u."organizationId"
-            JOIN "OperationalIssue" i ON i."id" = o."sourceId" AND i."organizationId" = p."organizationId" AND i."propertyId" = p."id"
+            JOIN ${sources} i ON i."id" = o."sourceId" AND i."organizationId" = p."organizationId" AND i."propertyId" = p."id"
             WHERE v."id" = o."deviceId" AND v."updatedAt" = o."deviceUpdatedAt" AND v."bindingVersion" = o."deviceBindingVersion" AND v."userId" = o."userId"
               AND v."sessionId" = o."sessionId" AND v."organizationId" = o."organizationId" AND v."revokedAt" IS NULL
               AND v."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND v."projectId" = ${HOST_PUSH_PROJECT}
@@ -153,7 +186,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient): HostPushDeli
               AND o."kind" = ANY(f."kinds") AND i."visibility" = 'HOST' AND i."workflowState" = 'ACTION_REQUIRED'
               AND i."actionRequired" = true AND i."resolvedAt" IS NULL AND i."reopenedCount" = o."sourceEpoch"
               AND i."severity"::text = ${snapshot.event.severity}
-              AND ${kindSql} = o."kind"
+              AND ${kindSql} = o."kind" ${messageFence}
               AND (f."quietStartHour" IS NULL OR (f."allowCritical" = true AND i."severity" = 'CRITICAL') OR NOT (
                 CASE WHEN f."quietStartHour" < f."quietEndHour" THEN
                   EXTRACT(HOUR FROM CURRENT_TIMESTAMP AT TIME ZONE f."timezone") >= f."quietStartHour"
@@ -195,6 +228,7 @@ export async function maintainHostPushRecords(db: PrismaClient, organizationIds:
     const deliveriesDeleted = await tx.$executeRaw(Prisma.sql`WITH obsolete AS (
       SELECT o."id" FROM "HostMobilePushDelivery" o
       WHERE o."organizationId" IN (${Prisma.join([...organizationIds])})
+        AND o."kind" <> 'GUEST_MESSAGE'
         AND o."state" IN ('PROVIDER_ACCEPTED','FAILED','SKIPPED')
         AND o."updatedAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
         AND o."expiresAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'

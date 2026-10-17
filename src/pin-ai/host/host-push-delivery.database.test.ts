@@ -22,6 +22,10 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
   const create = canonical.match(/CREATE TABLE "AuthSession" \([\s\S]*?\n\);/)?.[0];
   assert.ok(create);
   await db.$executeRawUnsafe(create.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
+  const inboundSql = readFileSync('prisma/migrations/20261003181000_channex_pin_ai_inbound/migration.sql', 'utf8');
+  for (const statement of inboundSql.split(';').filter(part => part.trim()))
+    await db.$executeRawUnsafe(statement.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')
+      .replace('CREATE UNIQUE INDEX ', 'CREATE UNIQUE INDEX IF NOT EXISTS ').replace('CREATE INDEX ', 'CREATE INDEX IF NOT EXISTS '));
   const org = await db.organization.create({data: {name: 'Synthetic push delivery'}});
   const other = await db.organization.create({data: {name: 'Synthetic unrelated tenant'}});
   const user = await db.dashboardUser.create({data: {organizationId: org.id, email: `${randomUUID()}@example.invalid`, passwordHash: 'synthetic', role: 'ORG_ADMIN'}});
@@ -172,6 +176,44 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       assert.equal((await db.authSession.findUniqueOrThrow({where: {id: session.id}})).lastActivityAt.getTime(), session.lastActivityAt.getTime());
       await clear();
     });
+    await t.test('canonical inbound attention is deduplicated, default-off and fenced by current source/thread authority', async () => {
+      const threadId = randomUUID(), messageId = randomUUID();
+      const thread = await db.channexAIThread.create({data: {organizationId: org.id, propertyId: property.id, threadId,
+        mode: 'HUMAN', since: new Date(now.getTime() - 60_000)}});
+      const inbound = await db.channexAIInbound.create({data: {organizationId: org.id, propertyId: property.id, threadId, messageId,
+        status: 'NEEDS_HOST', receivedAt: new Date(Date.now() - 1000)}});
+      await db.hostMobilePushPreference.update({where: {userId: user.id}, data: {kinds: ['GUEST_MESSAGE']}});
+      const messages = createHostPushDeliveryRepository(db, true);
+      const enqueueMessages = () => messages.materialize([property.id], new Date(env.HOST_MOBILE_PUSH_DELIVERY_NOT_BEFORE));
+      assert.equal(await enqueue(), 0, 'default repository never reads inbound sources');
+      await Promise.all([enqueueMessages(), enqueueMessages()]);
+      const row = (await messages.claim('SEND', 'inbound-owner'))!;
+      assert.equal(row.kind, 'GUEST_MESSAGE'); assert.equal(row.sourceId, `inbound:${inbound.id}`);
+      assert.equal(await enqueueMessages(), 0);
+      assert.equal(await repository.current(row), null, 'disabling messages also denies queued work');
+      const snapshot = (await messages.current(row))!;
+      assert.equal(await messages.arm(row, snapshot), false, 'local metadata is insufficient to authorize a message push');
+      snapshot.messageVerifiedAt = new Date();
+      await db.channexAIThread.update({where: {id: thread.id}, data: {mode: 'AUTO'}});
+      assert.equal(await messages.current(row), null); assert.equal(await messages.arm(row, snapshot), false);
+      await db.channexAIThread.update({where: {id: thread.id}, data: {mode: 'HUMAN', sending: true}});
+      assert.equal(await messages.current(row), null);
+      await db.channexAIThread.update({where: {id: thread.id}, data: {sending: false}});
+      await db.channexAIInbound.update({where: {id: inbound.id}, data: {status: 'SENT'}});
+      assert.equal(await messages.current(row), null); assert.equal(await messages.arm(row, snapshot), false);
+      await db.channexAIInbound.update({where: {id: inbound.id}, data: {status: 'NEEDS_HOST'}});
+      const fresh = (await messages.current(row))!;
+      fresh.messageVerifiedAt = new Date(Date.now() - 6000);
+      assert.equal(await messages.arm(row, fresh), false, 'external evidence expires after five seconds');
+      fresh.messageVerifiedAt = new Date();
+      assert.equal(await messages.arm(row, fresh), true);
+      assert.equal(await messages.finish(row, {state: 'UNKNOWN', code: 'SYNTHETIC'}), true);
+      assert.equal(await enqueueMessages(), 0);
+      await db.channexAIInbound.delete({where: {id: inbound.id}});
+      await db.channexAIThread.delete({where: {id: thread.id}});
+      await db.hostMobilePushPreference.update({where: {userId: user.id}, data: {kinds: ['GUEST_INCIDENT', 'CLEANING_EXCEPTION', 'ACCESS_EXCEPTION']}});
+      await clear();
+    });
     await t.test('bounded maintenance preserves live identities, uncertain sends, pending receipts and tenant isolation', async () => {
       await issue(); await enqueue();
       const original = await db.hostMobilePushDelivery.findFirstOrThrow({where: {organizationId: org.id}});
@@ -180,6 +222,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       await db.hostMobilePushDelivery.update({where: {id: original.id}, data: {state: 'FAILED', expiresAt: old, updatedAt: old}});
       const protectedRows = ['UNKNOWN', 'ACCEPTED', 'CHECKING', 'SENDING', 'CLAIMED', 'QUEUED'].map(state =>
         ({...aged, id: randomUUID(), sourceId: randomUUID(), state}));
+      protectedRows.push({...aged, id: randomUUID(), sourceId: randomUUID(), state: 'FAILED', kind: 'GUEST_MESSAGE'});
       protectedRows.push({...aged, id: randomUUID(), sourceId: randomUUID(), state: 'FAILED', updatedAt: new Date()});
       protectedRows.push({...aged, id: randomUUID(), sourceId: randomUUID(), state: 'FAILED', organizationId: other.id});
       await db.hostMobilePushDelivery.createMany({data: protectedRows});
@@ -193,7 +236,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       assert.deepEqual(await maintainHostPushRecords(db, [org.id]), {deliveriesDeleted: 500, devicesDeleted: 1});
       const concurrent = await Promise.all([maintainHostPushRecords(db, [org.id]), maintainHostPushRecords(db, [org.id])]);
       assert.equal(concurrent.reduce((sum, r) => sum + r.deliveriesDeleted, 0), 1);
-      assert.equal(await db.hostMobilePushDelivery.count({where: {id: {in: [original.id, ...protectedRows.map(r => r.id)]}}}), 9);
+      assert.equal(await db.hostMobilePushDelivery.count({where: {id: {in: [original.id, ...protectedRows.map(r => r.id)]}}}), 10);
       assert.ok(await db.hostMobilePushDevice.findUnique({where: {id: renewedDevice.id}}));
       assert.ok(await db.hostMobilePushDevice.findUnique({where: {id: device.id}}));
       // A fresh signal cannot rematerialize a retained source episode.
@@ -203,6 +246,8 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       await clear();
     });
   } finally {
+    await db.channexAIInbound.deleteMany({where: {organizationId: org.id}});
+    await db.channexAIThread.deleteMany({where: {organizationId: org.id}});
     await clear(); await db.authSession.deleteMany({where: {organizationId: org.id}});
     await db.property.deleteMany({where: {id: property.id}});
     await db.dashboardUser.deleteMany({where: {id: user.id}});

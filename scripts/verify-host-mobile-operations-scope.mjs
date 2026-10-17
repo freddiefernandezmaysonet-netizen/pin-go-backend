@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 export const BASE = '69434d924208153a444ef5716e7c414380dff899';
 export const MIGRATION = 'prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql';
 export const ALLOWED = [
+  "src/services/host-mobile-push-messages.ts",
+  "src/services/host-mobile-push-messages.test.ts",
   "docs/host-mobile-push-delivery.md",
   "src/services/host-mobile-push-token.ts",
   "src/services/host-mobile-push-token.test.ts",

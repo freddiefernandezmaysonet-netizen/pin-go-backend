@@ -86,3 +86,21 @@ test('maintenance stays independent, disabled by default and rejects missing or 
       HOST_MOBILE_PUSH_MAINTENANCE_ORGANIZATION_IDS: ids}), /MAINTENANCE_CONFIG_INVALID/);
   }
 });
+
+test('message delivery requires fresh external verification and rechecks local authority after the read', async () => {
+  for (const scenario of ['ready', 'skip', 'defer', 'changed', 'disabled']) {
+    const f = await fixture(); f.row.kind = 'GUEST_MESSAGE'; f.row.organizationId = 'org';
+    f.snapshot.event.kind = 'GUEST_MESSAGE'; f.snapshot.preference.kinds = ['GUEST_MESSAGE'];
+    f.snapshot.message = {threadId: 'thread', messageId: 'message', sourceRevision: now, threadRevision: now};
+    let reads = 0;
+    await runHostPushDeliveryCycle({env: {...env, HOST_MOBILE_PUSH_MESSAGES_ENABLED: scenario === 'disabled' ? 'false' : 'true'},
+      repository: f.repository, provider: () => f.provider, verifyMessage: async () => {
+        reads++;
+        if (scenario === 'changed') f.denyCurrent();
+        return scenario === 'skip' ? {state: 'SKIP'} : scenario === 'defer' ? {state: 'DEFER'} : {state: 'READY', verifiedAt: now};
+      }});
+    assert.equal(reads, scenario === 'disabled' ? 0 : 1);
+    assert.equal(f.sends, scenario === 'ready' ? 1 : 0);
+    assert.equal(f.arms, scenario === 'ready' ? 1 : 0);
+  }
+});

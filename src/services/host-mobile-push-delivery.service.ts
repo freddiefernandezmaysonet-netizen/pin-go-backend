@@ -1,3 +1,4 @@
+import type {VerifyHostPushMessage} from './host-mobile-push-messages.js';
 import {randomUUID} from 'node:crypto';
 import {prepareHostAttentionNotification} from './host-mobile-notification.policy.js';
 import {decryptHostPushToken, type HostPushEnvironment} from './host-mobile-push-token.js';
@@ -21,7 +22,7 @@ export function hostPushDeliveryConfig(env: HostPushEnvironment): HostPushDelive
 // Invoked explicitly by a separate process. No API-server import/startup hook.
 // Disabled configuration returns before provider creation or database access.
 export async function runHostPushDeliveryCycle(input: {
-  env: HostPushEnvironment; repository: HostPushDeliveryRepository; provider: () => HostPushProvider;
+  env: HostPushEnvironment; verifyMessage?: VerifyHostPushMessage; repository: HostPushDeliveryRepository; provider: () => HostPushProvider;
 }) {
   const config = hostPushDeliveryConfig(input.env);
   if (!config.enabled) return {enabled: false as const, processed: 0, enqueued: 0};
@@ -50,12 +51,12 @@ export async function runHostPushDeliveryCycle(input: {
         await input.repository.finish(row, {state: 'SKIPPED', code: 'DELIVERY_SCOPE_CHANGED'});
         continue;
       }
-      const snapshot = await input.repository.current(row);
+      let snapshot = await input.repository.current(row);
       if (!snapshot) {
         await input.repository.finish(row, {state: 'SKIPPED', code: 'CURRENT_AUTHORITY_DENIED'});
         continue;
       }
-      const prepared = prepareHostAttentionNotification(snapshot.event, snapshot.recipient, snapshot.preference, snapshot.checkedAt);
+      let prepared = prepareHostAttentionNotification(snapshot.event, snapshot.recipient, snapshot.preference, snapshot.checkedAt);
       if (prepared.status !== 'PREPARED') {
         await input.repository.finish(row, prepared.status === 'DEFER'
           ? {state: 'QUEUED', code: 'QUIET_HOURS', delayMs: 15 * 60_000}
@@ -68,6 +69,31 @@ export async function runHostPushDeliveryCycle(input: {
         // A missing rotation key is configuration failure, never a send attempt.
         await input.repository.finish(row, {state: 'QUEUED', code: 'TOKEN_UNAVAILABLE', delayMs: 15 * 60_000});
         continue;
+      }
+      if (row.kind === 'GUEST_MESSAGE') {
+        if (input.env.HOST_MOBILE_PUSH_MESSAGES_ENABLED !== 'true' || !input.verifyMessage || !snapshot.message) {
+          await input.repository.finish(row, {state: 'SKIPPED', code: 'MESSAGES_DISABLED'}); continue;
+        }
+        const before = snapshot.message;
+        const verified = await input.verifyMessage({organizationId: row.organizationId, propertyId: row.propertyId}, before, config.notBefore)
+          .catch(() => ({state: 'DEFER'} as const));
+        if (verified.state !== 'READY') {
+          await input.repository.finish(row, verified.state === 'SKIP'
+            ? {state: 'SKIPPED', code: 'MESSAGE_NO_LONGER_ACTIONABLE'}
+            : {state: 'QUEUED', code: 'MESSAGE_VERIFICATION_UNAVAILABLE', delayMs: 5 * 60_000});
+          continue;
+        }
+        // Network reads do not hold a DB transaction. Re-read all local authority
+        // afterward and require the same exact source/thread revisions.
+        snapshot = await input.repository.current(row);
+        if (!snapshot || !snapshot.message || JSON.stringify(snapshot.message) !== JSON.stringify(before)) {
+          await input.repository.finish(row, {state: 'QUEUED', code: 'MESSAGE_AUTHORITY_CHANGED', delayMs: 5 * 60_000}); continue;
+        }
+        prepared = prepareHostAttentionNotification(snapshot.event, snapshot.recipient, snapshot.preference, snapshot.checkedAt);
+        if (prepared.status !== 'PREPARED') {
+          await input.repository.finish(row, {state: 'QUEUED', code: 'MESSAGE_POLICY_CHANGED', delayMs: 5 * 60_000}); continue;
+        }
+        snapshot.messageVerifiedAt = verified.verifiedAt;
       }
       if (!await input.repository.arm(row, snapshot)) continue;
       // SENDING is durable before the first network byte. Any exception/crash

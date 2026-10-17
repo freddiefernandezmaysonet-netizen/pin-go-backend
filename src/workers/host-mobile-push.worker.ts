@@ -1,3 +1,4 @@
+import {buildHostPushMessageVerifier} from '../services/host-mobile-push-messages.js';
 import {pathToFileURL} from 'node:url';
 import {hostPushDeliveryConfig, runHostPushDeliveryCycle} from '../services/host-mobile-push-delivery.service.js';
 import {createHostPushDeliveryRepository, maintainHostPushRecords} from '../services/host-mobile-push-delivery.repository.js';
@@ -9,7 +10,11 @@ export async function runOnce(env: Readonly<Record<string, string | undefined>>)
   const provider = createExpoHostPushProvider(env.HOST_MOBILE_PUSH_EXPO_ACCESS_TOKEN ?? '');
   const {PrismaClient} = await import('@prisma/client');
   const db = new PrismaClient();
-  try { return await runHostPushDeliveryCycle({env, repository: createHostPushDeliveryRepository(db), provider: () => provider}); }
+  try {
+    const verifyMessage = buildHostPushMessageVerifier(db, env);
+    return await runHostPushDeliveryCycle({env, verifyMessage,
+      repository: createHostPushDeliveryRepository(db, !!verifyMessage), provider: () => provider});
+  }
   finally { await db.$disconnect(); }
 }
 // Independent flag and exact tenant scope: delivery activation never enables cleanup.
