@@ -113,4 +113,3 @@ jobs:
         run: |
           echo 'No voice service enabled. No real calls, OpenAI credentials, Twilio changes or network transport.' >> "$GITHUB_STEP_SUMMARY"
           echo 'This lease is unused by production until a separately certified owner-renewal loop is integrated.' >> "$GITHUB_STEP_SUMMARY"
-

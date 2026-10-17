@@ -158,4 +158,3 @@ jobs:
         run: |
           echo 'Sales voice all-source integration passed against latest main. No API route or worker was enabled.' >> "$GITHUB_STEP_SUMMARY"
           echo 'No real OpenAI/Twilio/SIP calls. Separate Airbnb CI scope check is not waived.' >> "$GITHUB_STEP_SUMMARY"
-

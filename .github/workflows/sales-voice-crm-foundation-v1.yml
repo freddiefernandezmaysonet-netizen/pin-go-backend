@@ -129,4 +129,3 @@ jobs:
           echo 'Actual additive SQL applied to disposable PostgreSQL; schema parity, 16 database contracts, and backend bundle passed.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Baseline came from the base schema, not the full historical migration chain. No production migration or telephone test was run.' >> "$GITHUB_STEP_SUMMARY"
           echo 'This job does not waive other checks or authorize merge, deployment, messages, or telephone activation.' >> "$GITHUB_STEP_SUMMARY"
-

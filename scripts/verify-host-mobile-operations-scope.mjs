@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 export const BASE = '69434d924208153a444ef5716e7c414380dff899';
 export const MIGRATION = 'prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql';
 export const ALLOWED = [
+  ".github/workflows/ota-initial-distribution-enablement.yml",
+  ".github/workflows/sales-voice-live-sip-mount-v1.yml",
   ".github/workflows/channex-host-inbox-v1.yml",
   ".github/workflows/ota-airbnb-listing-discovery.yml",
   ".github/workflows/pin-ai-host-incidents-v1.yml",
@@ -50,11 +52,24 @@ export function verifyHostScope({ event, paths, before, after, base = BASE }) {
   assert.equal(event.pull_request?.head?.ref, 'agent/host-mobile-operations-20261016');
   assert.equal(event.pull_request?.base?.ref, 'main');
   assert.equal(event.pull_request?.base?.sha, base, 'Re-review scope after base changes');
-  assert.deepEqual([...paths].sort(), ALLOWED, 'Exact Host operation files required');
+  assert.deepEqual([...paths].sort(), [...ALLOWED].sort(), 'Exact Host operation files required');
   assert.equal(after.split(RELATIONS).length, 2, 'Exactly one Host user relation block');
   assert.ok(after.endsWith(MODELS), 'Exact additive Host models required');
   assert.equal(after.slice(0, -MODELS.length).replace(RELATIONS, ''), before,
     'Every pre-existing schema definition, including sales and OTA, must be unchanged');
+}
+
+export function inspectCandidate(git, event, runtimeSchema) {
+  const candidate = event.pull_request.head.sha;
+  assert.match(candidate, /^[0-9a-f]{40}$/);
+  assert.equal(git('merge-base', BASE, candidate).trim(), BASE, 'Pinned base must be a candidate ancestor');
+  assert.equal(git('merge-base', candidate, 'HEAD').trim(), candidate, 'Checkout must include candidate');
+  const candidateSchema = git('show', candidate + ':prisma/schema.prisma');
+  assert.equal(runtimeSchema, candidateSchema, 'Merged checkout schema requires separate review if different');
+  const paths = git('diff', '--name-only', BASE, candidate).trim().split('\n');
+  verifyHostScope({event, paths, before:git('show', BASE + ':prisma/schema.prisma'), after:candidateSchema});
+  git('diff', '--check', BASE, candidate);
+  git('diff', '--check', BASE, 'HEAD');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -62,11 +77,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   assert.equal(process.env.GITHUB_REPOSITORY, 'freddiefernandezmaysonet-netizen/pin-go-backend');
   const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
-  assert.equal(git('merge-base', BASE, 'HEAD').trim(), BASE, 'Pinned base must be an ancestor');
-  assert.equal(git('merge-base', event.pull_request.head.sha, 'HEAD').trim(), event.pull_request.head.sha);
-  const paths = git('diff', '--name-only', BASE, 'HEAD').trim().split('\n');
-  verifyHostScope({ event, paths, before: git('show', BASE + ':prisma/schema.prisma'),
-    after: readFileSync('prisma/schema.prisma', 'utf8') });
-  git('diff', '--check', BASE, 'HEAD');
-  console.log('PASS exact PR472 Host scope; existing sales/OTA schema preserved. Continue every runtime suite.');
+  inspectCandidate(git, event, readFileSync('prisma/schema.prisma','utf8'));
+  console.log('PASS exact PR472 candidate scope; existing sales/OTA schema preserved. Continue every runtime suite.');
 }

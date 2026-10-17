@@ -42,3 +42,20 @@ test('rejects altered Host models, missing/duplicate relation blocks and appende
     const f=fixture();f.after=mutate(f.after);assert.throws(()=>verifyHostScope(f));
   }
 });
+
+test('candidate scope excludes unrelated files from GitHub merge checkout and checks its schema', async () => {
+  const {inspectCandidate}=await import('./verify-host-mobile-operations-scope.mjs');
+  const f=fixture(); const candidate='b'.repeat(40);f.event.pull_request.head.sha=candidate;
+  const calls=[];
+  const git=(...args)=>{
+    calls.push(args);
+    if(args[0]==='merge-base') return args[1]+'\n';
+    if(args[0]==='show') return args[1].startsWith(BASE)?f.before:f.after;
+    if(args[1]==='--check') return '';
+    assert.equal(args[3],candidate,'File scope must use candidate, never synthetic HEAD');
+    return f.paths.join('\n');
+  };
+  assert.doesNotThrow(()=>inspectCandidate(git,f.event,f.after));
+  assert.ok(calls.some(a=>a.join(' ')==='diff --check '+BASE+' HEAD'));
+  assert.throws(()=>inspectCandidate(git,f.event,f.after+'\nmodel Foreign { id String @id }'));
+});
