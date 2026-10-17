@@ -12,12 +12,12 @@ test('read inputs reject supplied authority, timestamps, bulk marks and invalid 
 test('only an exact visible guest message can be marked; readback scopes receipts to the current Host', async () => {
   const writes = [], reads = [];
   const api = createMobileMessageReads({hostMobileMessageRead: {
-    upsert: async value => {writes.push(value);},
+    createMany: async value => {writes.push(value);},
     findMany: async value => {reads.push(value); return [{messageId: id}];},
   }});
   const guest = {id, sender: 'guest'}, property = {id: 'other', sender: 'property'};
   assert.deepEqual(await api.mark(scope, id, [guest]), {messageId: id, read: true});
-  assert.deepEqual(writes[0], {where: {organizationId_userId_propertyId_threadId_messageId: {...scope, messageId: id}}, create: {...scope, messageId: id}, update: {}});
+  assert.deepEqual(writes[0], {data: [{...scope, messageId: id}], skipDuplicates: true});
   for (const items of [[], [{id, sender: 'property'}]]) await assert.rejects(api.mark(scope, id, items), /NOT_VISIBLE/);
   const result = await api.decorate(scope, [guest, property]);
   assert.equal(result[0].read, true); assert.equal(result[1].read, null);

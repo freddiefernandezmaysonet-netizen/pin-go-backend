@@ -21,10 +21,10 @@ export function createMobileMessageReads(db: Pick<PrismaClient, 'hostMobileMessa
     async mark(scope: MessageReadScope, messageId: string, canonicalItems: Message[]) {
       if (!validId(scope.threadId) || !validId(messageId) || canonicalItems.length > 25 ||
           !canonicalItems.some(m => m.id === messageId && m.sender === 'guest')) throw new InboxError('HOST_MESSAGE_NOT_VISIBLE', 409);
-      // Exact-message upsert is idempotent; reading one message never acknowledges
+      // Atomic INSERT ON CONFLICT DO NOTHING is idempotent; reading one message never acknowledges
       // newer, off-page messages or another Host's inbox. No provider write.
       const key = {...scope, messageId};
-      await db.hostMobileMessageRead.upsert({where: {organizationId_userId_propertyId_threadId_messageId: key}, create: key, update: {}});
+      await db.hostMobileMessageRead.createMany({data: [key], skipDuplicates: true});
       return {messageId, read: true as const};
     },
   };

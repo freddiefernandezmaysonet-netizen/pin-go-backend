@@ -6,6 +6,7 @@ import {PrismaClient} from '@prisma/client';
 import {createHostPushRegistry} from '../../services/host-mobile-notification.registry.js';
 import {createHostPushDeliveryRepository, maintainHostPushRecords} from '../../services/host-mobile-push-delivery.repository.js';
 import {runHostPushDeliveryCycle} from '../../services/host-mobile-push-delivery.service.js';
+import {createMobileMessageReads} from '../../channex-messaging/mobile-message-read.js';
 import {HOST_PUSH_PROJECT} from '../../services/host-mobile-push-token.js';
 
 const enabled = process.env.PIN_AI_HOST_INCIDENT_DB_TEST === 'true';
@@ -209,9 +210,8 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       const readKey = {organizationId: org.id, userId: user.id, propertyId: property.id, threadId, messageId};
       await db.hostMobileMessageRead.create({data: {...readKey, userId: 'another-host'}});
       assert.ok(await messages.current(row), 'another Host reading cannot suppress this recipient');
-      await Promise.all(Array.from({length: 4}, () => db.hostMobileMessageRead.upsert({
-        where: {organizationId_userId_propertyId_threadId_messageId: readKey}, create: readKey, update: {},
-      })));
+      await Promise.all(Array.from({length: 4}, () => createMobileMessageReads(db).mark(readKey, messageId,
+        [{id: messageId, sender: 'guest', text: 'synthetic', insertedAt: now.toISOString(), attachments: []}])));
       assert.equal(await db.hostMobileMessageRead.count({where: readKey}), 1);
       assert.equal(await messages.current(row), null);
       assert.equal(await messages.arm(row, fresh), false, 'reading after verification cancels the pending send');

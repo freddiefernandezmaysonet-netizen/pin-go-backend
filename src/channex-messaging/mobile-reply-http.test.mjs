@@ -30,10 +30,10 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
   };
   const messageId = '11111111-1111-4111-8111-111111111111';
   let revokeDuringRead = false; const readWrites = [];
-  const readFind = prisma.hostMobileMessageRead.findMany, readWrite = prisma.hostMobileMessageRead.upsert;
-  t.after(() => {prisma.hostMobileMessageRead.findMany = readFind; prisma.hostMobileMessageRead.upsert = readWrite; delete process.env.HOST_MOBILE_MESSAGE_READ_ENABLED;});
+  const readFind = prisma.hostMobileMessageRead.findMany, readWrite = prisma.hostMobileMessageRead.createMany;
+  t.after(() => {prisma.hostMobileMessageRead.findMany = readFind; prisma.hostMobileMessageRead.createMany = readWrite; delete process.env.HOST_MOBILE_MESSAGE_READ_ENABLED;});
   prisma.hostMobileMessageRead.findMany = async () => readWrites.map(() => ({messageId}));
-  prisma.hostMobileMessageRead.upsert = async args => {readWrites.push(args); return {...args.create, readAt: new Date()};};
+  prisma.hostMobileMessageRead.createMany = async args => {readWrites.push(args); return {count: 1};};
   const app = express(); app.use(express.json());
   app.use(buildDashboardChannexHostInboxRouter({ runtime: { async messages(scope, threadId, page) {
     assert.equal(scope.organizationId, 'org'); assert.equal(scope.userId, 'host');
@@ -66,7 +66,7 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     assert.equal(await markRead(), 401); assert.equal(readWrites.length, 0);
     revokeDuringRead = false; revoked = false;
     assert.equal(await markRead(), 200); assert.equal(readWrites.length, 1);
-    assert.equal(readWrites[0].create.userId, 'host'); assert.equal(readWrites[0].create.organizationId, 'org');
+    assert.equal(readWrites[0].data[0].userId, 'host'); assert.equal(readWrites[0].data[0].organizationId, 'org');
     const readResult = await fetch(readUrl + '/mobile-messages?page=1&limit=25', {headers: readHeaders});
     assert.equal(readResult.status, 200); assert.equal((await readResult.json()).items[0].read, true);
     const receiptUrl = `http://127.0.0.1:${server.address().port}/api/dashboard/channex-messages/properties/local/threads/11111111-1111-4111-8111-111111111111/mobile-receipt`;
