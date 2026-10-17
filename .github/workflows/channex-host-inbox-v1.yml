@@ -53,6 +53,7 @@ jobs:
         run: >-
           node --import tsx --test
           src/channex-messaging/*.test.ts
+          src/channex-messaging/*.test.mjs
           src/routes/dashboard.channex-host-inbox.route.test.ts
           src/routes/channex-messages.webhook.route.test.ts
           src/pin-ai/property-knowledge.service.test.ts
