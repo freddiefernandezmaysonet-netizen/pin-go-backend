@@ -13,6 +13,7 @@ export async function findMobileAccessRevocationsDue(
         { endsAt: { lte: now } },
         { accessGrant: { status: { in: ["REVOKED", "FAILED"] } } },
         { reservation: { status: "CANCELLED" } },
+        { guestDeviceSession: { revokedAt: { not: null } } },
       ],
     },
     select: {

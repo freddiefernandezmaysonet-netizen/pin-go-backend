@@ -72,11 +72,13 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly organizationId: string,
-    private readonly recipientIdentityId: string,
+    private readonly recipientIdentityId?: string,
   ) {}
 
   async issueTimeboundKey(input: MobileAccessProviderIssueInput): Promise<MobileAccessProviderCredential> {
-    const identity = await this.prisma.tTLockRecipientIdentity.findUnique({ where: { id: this.recipientIdentityId } });
+    const recipientIdentityId = this.recipientIdentityId;
+    if (!recipientIdentityId) throw new Error("TTLOCK_RECIPIENT_IDENTITY_REQUIRED");
+    const identity = await this.prisma.tTLockRecipientIdentity.findUnique({ where: { id: recipientIdentityId } });
     if (
       !identity ||
       identity.status !== "ACTIVE" ||
