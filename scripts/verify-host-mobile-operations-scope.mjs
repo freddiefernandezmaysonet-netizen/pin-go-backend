@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 export const BASE = '69434d924208153a444ef5716e7c414380dff899';
 export const MIGRATION = 'prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql';
 export const ALLOWED = [
+  "src/services/sales-voice-safety-controller.service.test.ts",
   ".github/workflows/ota-initial-distribution-enablement.yml",
   ".github/workflows/sales-voice-live-sip-mount-v1.yml",
   ".github/workflows/channex-host-inbox-v1.yml",
@@ -59,6 +60,15 @@ export function verifyHostScope({ event, paths, before, after, base = BASE }) {
     'Every pre-existing schema definition, including sales and OTA, must be unchanged');
 }
 
+export const EXPIRY_TEST = 'src/services/sales-voice-safety-controller.service.test.ts';
+const OLD_EXPIRY_FIXTURE = 'await seed(1);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};';
+const NEW_EXPIRY_FIXTURE = 'await seed(10);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};';
+export function verifyExpiryFixture(before, after) {
+  assert.equal(before.split(OLD_EXPIRY_FIXTURE).length,2,'Exactly one original expiry fixture');
+  assert.equal(after,before.replace(OLD_EXPIRY_FIXTURE,NEW_EXPIRY_FIXTURE),
+    'Only position the test call safely inside the expired window; preserve all assertions');
+}
+
 export function inspectCandidate(git, event, runtimeSchema) {
   const candidate = event.pull_request.head.sha;
   assert.match(candidate, /^[0-9a-f]{40}$/);
@@ -68,6 +78,7 @@ export function inspectCandidate(git, event, runtimeSchema) {
   assert.equal(runtimeSchema, candidateSchema, 'Merged checkout schema requires separate review if different');
   const paths = git('diff', '--name-only', BASE, candidate).trim().split('\n');
   verifyHostScope({event, paths, before:git('show', BASE + ':prisma/schema.prisma'), after:candidateSchema});
+  verifyExpiryFixture(git('show',BASE+':'+EXPIRY_TEST),git('show',candidate+':'+EXPIRY_TEST));
   git('diff', '--check', BASE, candidate);
   git('diff', '--check', BASE, 'HEAD');
 }

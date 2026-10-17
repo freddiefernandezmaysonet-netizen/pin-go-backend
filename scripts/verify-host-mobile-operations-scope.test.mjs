@@ -50,7 +50,13 @@ test('candidate scope excludes unrelated files from GitHub merge checkout and ch
   const git=(...args)=>{
     calls.push(args);
     if(args[0]==='merge-base') return args[1]+'\n';
-    if(args[0]==='show') return args[1].startsWith(BASE)?f.before:f.after;
+    if(args[0]==='show') {
+      if(args[1].endsWith('sales-voice-safety-controller.service.test.ts')) {
+        const age=args[1].startsWith(BASE)?1:10;
+        return 'await seed('+age+');const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};';
+      }
+      return args[1].startsWith(BASE)?f.before:f.after;
+    }
     if(args[1]==='--check') return '';
     assert.equal(args[3],candidate,'File scope must use candidate, never synthetic HEAD');
     return f.paths.join('\n');
@@ -58,4 +64,15 @@ test('candidate scope excludes unrelated files from GitHub merge checkout and ch
   assert.doesNotThrow(()=>inspectCandidate(git,f.event,f.after));
   assert.ok(calls.some(a=>a.join(' ')==='diff --check '+BASE+' HEAD'));
   assert.throws(()=>inspectCandidate(git,f.event,f.after+'\nmodel Foreign { id String @id }'));
+});
+
+
+test('expiry fixture may move off the exclusive boundary without changing assertions or other tests', async()=>{
+  const {verifyExpiryFixture}=await import('./verify-host-mobile-operations-scope.mjs');
+  const before='test prefix; await seed(1);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000}; assert.equal(calls,1);';
+  const after=before.replace('seed(1)','seed(10)');
+  assert.doesNotThrow(()=>verifyExpiryFixture(before,after));
+  assert.throws(()=>verifyExpiryFixture(before,after.replace('assert.equal(calls,1)','assert.equal(calls,0)')));
+  assert.throws(()=>verifyExpiryFixture(before,after+' changed runtime'));
+  assert.throws(()=>verifyExpiryFixture(before,before));
 });
