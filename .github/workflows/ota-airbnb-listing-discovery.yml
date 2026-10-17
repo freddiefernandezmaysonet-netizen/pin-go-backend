@@ -1074,6 +1074,19 @@ jobs:
       - name: Prove unaffected certified Channex transports and workers remain frozen
         shell: bash
         run: |
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
+            node --test scripts/verify-host-mobile-operations-scope.test.mjs
+            node scripts/verify-host-mobile-operations-scope.mjs
+            # The new disabled Host entry point is not a pre-existing Channex
+            # worker. Freeze every existing worker/transport and retain all
+            # following fingerprint, type, lifecycle and listing tests.
+            BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"
+            git diff --exit-code "$BASE_RANGE" -- src/pms src/workers \
+              src/distribution/channex-readonly.http-transport.ts \
+              src/distribution/channex-white-label.http-transport.ts \
+              ':(exclude)src/workers/host-mobile-push.worker.ts'
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/pin-ai-hybrid-billing" ]; then
             python3 scripts/verify-pin-ai-hybrid-pr-scope.py
             BASE_RANGE="origin/${GITHUB_BASE_REF:-main}...HEAD"

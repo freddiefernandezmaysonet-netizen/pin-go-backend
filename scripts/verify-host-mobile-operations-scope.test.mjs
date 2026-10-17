@@ -25,7 +25,7 @@ test('rejects foreign PR, fork, branch, target and changed base', () => {
 });
 test('rejects unrelated sales or OTA files, missing scope files and duplicates', () => {
   for (const change of [ p=>p.push('src/services/sales-voice-commercial.service.ts'),
-    p=>p.push('src/distribution/airbnb.ts'),p=>p.pop(),p=>p.push(p[0]) ]) {
+    p=>p.push('src/distribution/airbnb.ts'),p=>p.push('src/workers/reservation.worker.ts'),p=>p.pop(),p=>p.push(p[0]) ]) {
     const f=fixture(); change(f.paths); assert.throws(()=>verifyHostScope(f));
   }
 });
