@@ -3699,6 +3699,7 @@ model HostMobilePushDevice {
   sessionId String
   tokenHash String @unique
   tokenCiphertext String
+  bindingVersion Int @default(1)
   platform String
   projectId String
   revokedAt DateTime?
@@ -3721,4 +3722,40 @@ model HostMobilePushPreference {
   revision Int @default(0)
   updatedAt DateTime @updatedAt
   user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Metadata-only dispatch ledger. Live authority always comes from current source,
+// device, user, property and session rows; these scalar references confer no access.
+model HostMobilePushDelivery {
+  id String @id
+  sourceId String
+  sourceEpoch Int
+  organizationId String
+  propertyId String
+  userId String
+  sessionId String
+  deviceId String
+  deviceUpdatedAt DateTime
+  deviceBindingVersion Int
+  eventId String
+  kind String
+  occurredAt DateTime
+  expiresAt DateTime
+  state String @default("QUEUED")
+  availableAt DateTime @default(now())
+  leaseOwner String?
+  leaseUntil DateTime?
+  leaseEpoch Int @default(0)
+  attempts Int @default(0)
+  ticketId String?
+  acceptedAt DateTime?
+  receiptDeadline DateTime?
+  outcomeCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sourceId, sourceEpoch, deviceId, userId], map: "HostMobilePushDelivery_source_device_user_key")
+  @@index([state, availableAt])
+  @@index([leaseUntil])
+  @@index([organizationId, userId])
 }

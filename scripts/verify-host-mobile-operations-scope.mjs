@@ -6,6 +6,18 @@ import { pathToFileURL } from 'node:url';
 export const BASE = '69434d924208153a444ef5716e7c414380dff899';
 export const MIGRATION = 'prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql';
 export const ALLOWED = [
+  "docs/host-mobile-push-delivery.md",
+  "src/services/host-mobile-push-token.ts",
+  "src/services/host-mobile-push-token.test.ts",
+  "src/services/host-mobile-push-provider.ts",
+  "src/services/host-mobile-push-provider.test.ts",
+  "src/services/host-mobile-push-delivery.repository.ts",
+  "src/services/host-mobile-push-delivery.service.ts",
+  "src/services/host-mobile-push-delivery.service.test.ts",
+  "src/pin-ai/host/host-push-delivery.database.test.ts",
+  "src/workers/host-mobile-push.worker.ts",
+  "tsconfig.host-mobile-push.json",
+
   "src/services/sales-voice-safety-controller.service.test.ts",
   ".github/workflows/ota-initial-distribution-enablement.yml",
   ".github/workflows/sales-voice-live-sip-mount-v1.yml",
@@ -43,7 +55,7 @@ export const ALLOWED = [
   "src/services/host-mobile-notification.registry.ts"
 ];
 export const RELATIONS = "  mobilePushDevices HostMobilePushDevice[]\n  mobilePushPreference HostMobilePushPreference?\n";
-export const MODELS = "\nmodel HostMobilePushDevice {\n  id String @id\n  userId String\n  organizationId String\n  sessionId String\n  tokenHash String @unique\n  tokenCiphertext String\n  platform String\n  projectId String\n  revokedAt DateTime?\n  expiresAt DateTime\n  updatedAt DateTime @updatedAt\n  createdAt DateTime @default(now())\n  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)\n  @@index([organizationId, userId, sessionId])\n}\n\nmodel HostMobilePushPreference {\n  userId String @id\n  organizationId String\n  enabled Boolean @default(false)\n  kinds String[]\n  timezone String @default(\"UTC\")\n  quietStartHour Int?\n  quietEndHour Int?\n  allowCritical Boolean @default(false)\n  revision Int @default(0)\n  updatedAt DateTime @updatedAt\n  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)\n}\n";
+export const MODELS = "\nmodel HostMobilePushDevice {\n  id String @id\n  userId String\n  organizationId String\n  sessionId String\n  tokenHash String @unique\n  tokenCiphertext String\n  bindingVersion Int @default(1)\n  platform String\n  projectId String\n  revokedAt DateTime?\n  expiresAt DateTime\n  updatedAt DateTime @updatedAt\n  createdAt DateTime @default(now())\n  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)\n  @@index([organizationId, userId, sessionId])\n}\n\nmodel HostMobilePushPreference {\n  userId String @id\n  organizationId String\n  enabled Boolean @default(false)\n  kinds String[]\n  timezone String @default(\"UTC\")\n  quietStartHour Int?\n  quietEndHour Int?\n  allowCritical Boolean @default(false)\n  revision Int @default(0)\n  updatedAt DateTime @updatedAt\n  user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)\n}\n\n// Metadata-only dispatch ledger. Live authority always comes from current source,\n// device, user, property and session rows; these scalar references confer no access.\nmodel HostMobilePushDelivery {\n  id String @id\n  sourceId String\n  sourceEpoch Int\n  organizationId String\n  propertyId String\n  userId String\n  sessionId String\n  deviceId String\n  deviceUpdatedAt DateTime\n  deviceBindingVersion Int\n  eventId String\n  kind String\n  occurredAt DateTime\n  expiresAt DateTime\n  state String @default(\"QUEUED\")\n  availableAt DateTime @default(now())\n  leaseOwner String?\n  leaseUntil DateTime?\n  leaseEpoch Int @default(0)\n  attempts Int @default(0)\n  ticketId String?\n  acceptedAt DateTime?\n  receiptDeadline DateTime?\n  outcomeCode String?\n  createdAt DateTime @default(now())\n  updatedAt DateTime @updatedAt\n\n  @@unique([sourceId, sourceEpoch, deviceId, userId], map: \"HostMobilePushDelivery_source_device_user_key\")\n  @@index([state, availableAt])\n  @@index([leaseUntil])\n  @@index([organizationId, userId])\n}\n";
 
 export function verifyHostScope({ event, paths, before, after, base = BASE }) {
   const repo = 'freddiefernandezmaysonet-netizen/pin-go-backend';

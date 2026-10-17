@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "esModuleInterop": true, "skipLibCheck": true,
+    "noEmit": true, "types": ["node"]
+  },
+  "include": [
+    "src/services/host-mobile-push-*.ts",
+    "src/pin-ai/host/host-push-delivery.database.test.ts",
+    "src/workers/host-mobile-push.worker.ts"
+  ]
+}

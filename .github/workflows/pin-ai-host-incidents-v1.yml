@@ -6,6 +6,9 @@ on:
       - "src/pin-ai/**"
       - "src/services/host-mobile-notification.policy*"
       - "src/services/host-mobile-notification.registry.ts"
+      - "src/services/host-mobile-push-*"
+      - "src/workers/host-mobile-push.worker.ts"
+      - "tsconfig.host-mobile-push.json"
       - "src/routes/host-mobile-notifications.routes.ts"
       - "src/routes/dashboard.pin-ai-host-incidents.routes.ts"
       - "src/server.ts"
@@ -84,10 +87,12 @@ jobs:
           fi
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
-        run: node --import tsx --test src/pin-ai/host/*.test.ts src/services/host-mobile-notification.policy.test.ts
+        run: node --import tsx --test src/pin-ai/host/*.test.ts src/services/host-mobile-notification.policy.test.ts src/services/host-mobile-push-*.test.ts
       - name: Strict typecheck and emitted build
         run: |
           npx tsc -p tsconfig.pin-ai-host-incidents.json
+          npx tsc -p tsconfig.host-mobile-push.json
+          npx tsc -p tsconfig.host-mobile-push.json --noEmit false --outDir /tmp/host-push-build
           npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck src/services/host-mobile-notification.policy.ts src/services/host-mobile-notification.policy.test.ts
           npx tsc -p tsconfig.pin-ai-host-incidents.json --noEmit false --outDir /tmp/host-incident-build
       - name: Existing guest runtime and incident regression tests

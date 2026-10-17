@@ -42,7 +42,7 @@ export function createHostPushRegistry(db:PrismaClient,env:Env){
       const input=parsePushRegistration(body),tokenHash=createHash('sha256').update(input.token).digest('hex');
       const tokenCiphertext=sealToken(env,JSON.stringify([actor.orgId,actor.id,actor.sessionId,tokenHash]),input.token);
       // Possession of the push token permits rebinding that token on account switch; old actor/session ownership is replaced atomically.
-      await prisma.hostMobilePushDevice.upsert({where:{tokenHash},create:{id:randomUUID(),userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenHash,tokenCiphertext,platform:input.platform,projectId:PROJECT,expiresAt:new Date(now.getTime()+30*86400000)},update:{userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenCiphertext,platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:new Date(now.getTime()+30*86400000)}});
+      await prisma.hostMobilePushDevice.upsert({where:{tokenHash},create:{id:randomUUID(),userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenHash,tokenCiphertext,bindingVersion:1,platform:input.platform,projectId:PROJECT,expiresAt:new Date(now.getTime()+30*86400000)},update:{userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenCiphertext,bindingVersion:{increment:1},platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:new Date(now.getTime()+30*86400000)}});
       return {registered:true};
     },
     async revokeSession(actor:PushActor,now=new Date()){
