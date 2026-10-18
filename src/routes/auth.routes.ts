@@ -23,7 +23,7 @@ import {
   type E7Environment,
 } from "../auth/mfa-global-runtime.js";
 import { createAuthSession } from "../auth/trusted-device-session.persistence.js";
-import { extractTrustedDeviceToken } from "../auth/trusted-device-cookie.js";
+import { loginTrustedDeviceToken } from "../auth/mobile-trusted-device.js";
 import {
   signSessionBoundAuthToken,
   verifySessionBoundAuthToken,
@@ -105,7 +105,7 @@ authRouter.post("/auth/login", async (req, res) => {
       if (!staff) return res.status(403).json({ error: "CLEANER_IDENTITY_REQUIRED" });
     }
 
-    const trustedDeviceToken = extractTrustedDeviceToken(req);
+    const trustedDeviceToken = loginTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
     const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);
     let boundSessionId: string | null = null;
@@ -465,3 +465,4 @@ authRouter.post("/api/auth/register-organization", async (req, res) => {
     });
   }
 });
+

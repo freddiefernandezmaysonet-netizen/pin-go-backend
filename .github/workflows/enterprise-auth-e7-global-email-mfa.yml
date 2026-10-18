@@ -7,6 +7,8 @@ on:
       - ".github/workflows/enterprise-auth-e7-global-email-mfa.yml"
       - "src/auth/mfa-global-runtime.ts"
       - "src/auth/mfa-login.routes.ts"
+      - "src/auth/mobile-trusted-device.ts"
+      - "src/auth/mobile-trusted-device.http.test.ts"
       - "src/auth/enterprise-auth-e7.test.ts"
       - "src/routes/auth.routes.ts"
       - "src/routes/public.signup.success.routes.ts"
@@ -70,6 +72,7 @@ jobs:
           src/auth/enterprise-auth-e6.test.ts
           src/auth/mfa-email-branding.test.ts
           src/auth/enterprise-auth-e7.test.ts
+          src/auth/mobile-trusted-device.http.test.ts
 
       - name: TypeScript E7 module contract
         run: npx tsc -p tsconfig.enterprise-auth-e7.json
@@ -119,3 +122,4 @@ jobs:
           ! grep -q 'Set-Cookie' src/routes/public.signup.success.routes.ts
           test "$(grep -o 'signSessionBoundAuthToken(' src/routes/auth.routes.ts | wc -l | tr -d ' ')" = "1"
           test "$(grep -o 'signSessionBoundAuthToken(' src/auth/mfa-login.routes.ts | wc -l | tr -d ' ')" = "1"
+
