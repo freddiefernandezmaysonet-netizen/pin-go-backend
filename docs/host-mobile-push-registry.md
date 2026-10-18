@@ -11,3 +11,19 @@ GET /preferences returns only the current actor's settings, default disabled. PU
 The schema/migration now adds three tables, including the metadata-only delivery ledger described in docs/host-mobile-push-delivery.md. CI applies the migration only to the isolated Host test database and exercises uniqueness, preference concurrency and scoped retirement. Local 19 Host tests passed; three PostgreSQL suites were skipped locally and must pass remotely. HTTP tests cover current signed sessions, revoked session, changed role, unavailable validation, denied Cookie/Origin transports, invalid tokens and disabled registration. Prisma schema validation and TypeScript passed.
 
 Companion Host PR7 already includes native permission/token integration, preferences, logout cleanup and authorized tap navigation; its exact-head runs 39015236036 and 39015235991 passed. The new disabled delivery candidate adds durable source/device work, fenced dispatch, strict token decryption and ticket/receipt recovery. See docs/host-mobile-push-delivery.md for supported sources, configuration, uncertainty and remaining release gates. Physical delivery, inbound guest-message production, retention maintenance, operational reconciliation and provider setup remain incomplete. The registry routes themselves send no notification. Keep all sending disabled until current-head integration evidence and controlled physical certification are reviewed.
+
+
+## Current-device status
+
+POST /api/host-mobile/notifications/devices/status uses the same native Host
+session guard and rate limit as registration. Its JSON body is the existing
+registration shape: token, platform and the exact Host projectId. It hashes the
+supplied token in memory and looks up only an unrevoked, unexpired binding owned
+by the exact current user, organization and session. The response contains only
+ok and device: {registered, expiresAt}; an absent or foreign binding returns
+registered:false and expiresAt:null. It never returns the token, hash, ciphertext,
+device ID, other owner or other session. Status reads never renew/rebind devices.
+The mobile client must display unknown status on transport/unsupported-endpoint
+failure and must not infer registration from saved alert preferences. Successful
+registration is confirmed through this status readback. A new login requires an
+explicit reconnection. No migration or automatic delivery activation is required.
