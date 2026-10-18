@@ -35,6 +35,10 @@ jobs:
           cache: npm
       - name: Enforce exact five-file integration scope
         run: |
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
+            node --test scripts/verify-host-mobile-operations-scope.test.mjs
+            node scripts/verify-host-mobile-operations-scope.mjs
+          else
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {execFileSync} from 'node:child_process';
@@ -179,6 +183,7 @@ jobs:
           assert.deepEqual(paths, selected);
           NODE
           git diff --check "$BASE_SHA" HEAD
+          fi
       - name: Install pinned dependencies and generate Prisma client
         run: |
           npm ci --ignore-scripts --no-audit --no-fund

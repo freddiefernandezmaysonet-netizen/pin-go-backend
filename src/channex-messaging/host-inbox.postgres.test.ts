@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { buildHostInboxRuntime } from "./host-inbox.runtime.js";
+import { readMobileReplyReceipt } from "./mobile-reply-receipt.js";
 
 // Only an explicitly supplied local disposable database is allowed.
 const connection = process.env.INBOX_POSTGRES_TEST_URL;
@@ -61,6 +62,19 @@ test("host inbox receipt migration and concurrency in PostgreSQL", { skip: !conn
       assert.equal(result.replayed, true); assert.equal(posts, 1);
       await assert.rejects(rebuilt.reply({ ...reply, text: "different" }), /REQUEST_KEY_CONFLICT/);
       assert.equal(posts, 1);
+    });
+    await t.test("mobile receipt recovery uses persisted acceptance and exact actor/tenant/destination scope", async () => {
+      const { text: _text, ...scope } = reply;
+      const lookup = (input: typeof scope) => db2.channexHostMessageSend.findFirst({ where: input, select: { status: true, response: true } });
+      const accepted = await readMobileReplyReceipt(scope, lookup);
+      assert.equal(accepted.status, "ACCEPTED");
+      for (const change of [
+        { organizationId: "other-org" }, { requestedBy: "other-host" },
+        { propertyId: "other-property" }, { threadId: "33333333-3333-4333-8333-333333333333" },
+        { requestKey: "missing-key-123" },
+      ]) assert.equal((await readMobileReplyReceipt({ ...scope, ...change }, lookup)).status, "UNCONFIRMED");
+      assert.equal(posts, 1);
+      assert.equal(await db.channexHostMessageSend.count(), 1);
     });
     await t.test("uncertain delivery persists and blocks resubmission from another process client", async () => {
       const input = { ...reply, requestKey: "unknown-123", text: "uncertain" };

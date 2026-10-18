@@ -4,6 +4,12 @@ on:
     branches: [main]
     paths:
       - "src/pin-ai/**"
+      - "src/services/host-mobile-notification.policy*"
+      - "src/services/host-mobile-notification.registry.ts"
+      - "src/services/host-mobile-push-*"
+      - "src/workers/host-mobile-push.worker.ts"
+      - "tsconfig.host-mobile-push.json"
+      - "src/routes/host-mobile-notifications.routes.ts"
       - "src/routes/dashboard.pin-ai-host-incidents.routes.ts"
       - "src/server.ts"
       - "src/apms/operational-intelligence*"
@@ -75,12 +81,19 @@ jobs:
               npx prisma db execute --file "$migration" --schema prisma/schema.prisma
             fi
           done
+          push_migration=prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql
+          if ! git cat-file -e "$BASE_SHA:$push_migration" 2>/dev/null; then
+            npx prisma db execute --file "$push_migration" --schema prisma/schema.prisma
+          fi
           npx prisma generate
       - name: Host foundation unit and PostgreSQL API tests
-        run: node --import tsx --test src/pin-ai/host/*.test.ts
+        run: node --import tsx --test src/pin-ai/host/*.test.ts src/services/host-mobile-notification.policy.test.ts src/services/host-mobile-push-*.test.ts
       - name: Strict typecheck and emitted build
         run: |
           npx tsc -p tsconfig.pin-ai-host-incidents.json
+          npx tsc -p tsconfig.host-mobile-push.json
+          npx tsc -p tsconfig.host-mobile-push.json --noEmit false --outDir /tmp/host-push-build
+          npx tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --esModuleInterop --skipLibCheck src/services/host-mobile-notification.policy.ts src/services/host-mobile-notification.policy.test.ts
           npx tsc -p tsconfig.pin-ai-host-incidents.json --noEmit false --outDir /tmp/host-incident-build
       - name: Existing guest runtime and incident regression tests
         run: |

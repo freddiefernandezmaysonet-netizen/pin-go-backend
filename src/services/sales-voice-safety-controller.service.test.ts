@@ -327,7 +327,7 @@ test("supervision snapshots certification window and rejects replacement or bypa
 });
 
 test("PG window expiry drains while the scheduled loop and authenticated observer stay active",async()=>{
-  await seed(1);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};
+  await seed(10);const now=Date.now(),window={startsAtMs:now-20000,endsAtMs:now-1000};
   let calls=0;const f=fixture(owner,async()=>{calls++;return{status:200};});
   const limits={...f.options.admissionLimits,maxConcurrentCalls:1,certificationWindow:window};
   const c=new SimulatedSalesVoiceSafetyController({...f.options,maxOwned:1,admissionLimits:limits});

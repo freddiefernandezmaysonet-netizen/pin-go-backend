@@ -2,6 +2,13 @@ import { Router, type Request, type Response } from "express";
 import { requireAuth, type AuthenticatedUser } from "../middleware/requireAuth.js";
 import { InboxError, type Page } from "../channex-messaging/host-inbox.js";
 import type { buildHostInboxRuntime } from "../channex-messaging/host-inbox.runtime.js";
+import { authorizeMobileReply } from "../channex-messaging/mobile-reply-authorization.js";
+import { verifySessionBoundAuthToken } from "../auth/session-bound-token.js";
+import { guardAuthenticatedSession } from "../auth/session-request-guard.js";
+import { prisma } from "../lib/prisma.js";
+import { readMobileReplyReceipt } from "../channex-messaging/mobile-reply-receipt.js";
+
+import {createMobileMessageReads, messageReadInput} from "../channex-messaging/mobile-message-read.js";
 
 type Runtime = NonNullable<ReturnType<typeof buildHostInboxRuntime>>;
 type HostRequest = Request & { user?: AuthenticatedUser };
@@ -17,6 +24,16 @@ function page(req: Request): Page {
 function failure(res: Response, error: unknown) {
   const known = error instanceof InboxError;
   return res.status(known ? error.status : 503).json({ ok: false, error: known ? error.code : "HOST_INBOX_UNAVAILABLE" });
+}
+async function nativeAuthorization(req: HostRequest, enabled = process.env.HOST_MOBILE_REPLY_ENABLED === "true") {
+  await authorizeMobileReply({ enabled,
+    authorization: req.get("authorization"), origin: req.get("origin"), cookie: req.get("cookie"), identity: req.user }, {
+    verify: verifySessionBoundAuthToken,
+    guard: input => guardAuthenticatedSession(prisma as any, input),
+  }).catch(error => {
+    throw new InboxError(typeof error?.code === "string" ? error.code : "SESSION_VALIDATION_UNAVAILABLE",
+      typeof error?.status === "number" ? error.status : 503);
+  });
 }
 export function buildDashboardChannexHostInboxRouter(args: {
   runtime: Runtime | null;
@@ -34,6 +51,51 @@ export function buildDashboardChannexHostInboxRouter(args: {
     catch (error) { return failure(res, error); }
   });
   const path = `${prefix}/properties/:propertyId/threads`;
+  const readScope = (req: HostRequest) => ({organizationId: req.user!.orgId, userId: req.user!.id,
+    propertyId: req.params.propertyId!, threadId: req.params.threadId!});
+  const readAuthorization = async (req: HostRequest) => {
+    if (process.env.HOST_MOBILE_MESSAGE_READ_ENABLED !== "true") throw new InboxError("HOST_MESSAGE_READ_DISABLED", 503);
+    await nativeAuthorization(req, true);
+  };
+  router.get(`${path}/:threadId/mobile-messages`, async (req: HostRequest, res) => {
+    try {
+      await readAuthorization(req);
+      const scope = readScope(req), pagination = page(req);
+      if (pagination.limit !== 25) throw new InboxError("HOST_MESSAGE_READ_INVALID", 400);
+      const history = await args.runtime!.messages(scope, scope.threadId, pagination);
+      await readAuthorization(req);
+      return res.json({ok: true, ...history, readStateEnabled: true,
+        items: await createMobileMessageReads(prisma).decorate(scope, history.items)});
+    } catch (error) { return failure(res, error); }
+  });
+  router.post(`${path}/:threadId/mobile-read`, async (req: HostRequest, res) => {
+    try {
+      await readAuthorization(req);
+      const scope = readScope(req), input = messageReadInput(req.body);
+      const history = await args.runtime!.messages(scope, scope.threadId, {page: input.page, limit: 25});
+      await readAuthorization(req);
+      return res.json({ok: true, ...await createMobileMessageReads(prisma).mark(scope, input.messageId, history.items)});
+    } catch (error) { return failure(res, error); }
+  });
+  router.get(`${path}/:threadId/mobile-receipt`, async (req: HostRequest, res) => {
+    try {
+      await nativeAuthorization(req);
+      const receipt = await readMobileReplyReceipt({ organizationId: req.user!.orgId, requestedBy: req.user!.id,
+        propertyId: req.params.propertyId!, threadId: req.params.threadId!, requestKey: req.get("idempotency-key") ?? "" },
+        scope => prisma.channexHostMessageSend.findFirst({ where: scope, select: { status: true, response: true } }));
+      return res.json({ ok: true, ...receipt });
+    } catch (error) { return failure(res, error); }
+  });
+  router.post(`${path}/:threadId/mobile-messages`, async (req: HostRequest, res) => {
+    try {
+      await nativeAuthorization(req);
+      const body: unknown = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some(key => key !== "text") ||
+        typeof (body as { text?: unknown }).text !== "string") throw new InboxError("HOST_INBOX_REPLY_INVALID", 400);
+      return res.json({ ok: true, ...await args.runtime!.reply({ organizationId: req.user!.orgId, requestedBy: req.user!.id,
+        propertyId: req.params.propertyId!, threadId: req.params.threadId!, text: (body as { text: string }).text, requestKey: req.get("idempotency-key") ?? "" }) });
+    } catch (error) { return failure(res, error); }
+  });
   router.post(`${path}/:threadId/pin-ai-control`, async (req: HostRequest, res) => {
     try {
       const raw = req.get("origin");

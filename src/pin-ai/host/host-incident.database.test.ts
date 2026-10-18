@@ -6,7 +6,7 @@ import express from "express";
 import { PrismaClient } from "@prisma/client";
 import { buildHostIncidentRouter } from "../../routes/dashboard.pin-ai-host-incidents.routes.js";
 import { handleGuestIncident } from "../guest/guest-incident.service.js";
-import { applyHostIncidentCommand, listHostIncidents, readHostIncident, readPublishedIncidentUpdates } from "./host-incident.service.js";
+import { applyHostIncidentCommand, listHostIncidents, readHostIncident, readPublishedIncidentUpdates, readHostIncidentReceipt } from "./host-incident.service.js";
 import type { PinAIRuntimeRequest } from "../runtime/contracts.js";
 import { HOST_CHANNEL_UPDATE } from "./host-incident-channel.service.js";
 
@@ -66,6 +66,11 @@ test("PostgreSQL host foundation: tenant isolation, concurrency, privacy, revoca
     assert.equal(duplicate[0].eventId, duplicate[1].eventId);
     assert.equal((await read()).messages.length, 1);
     await assert.rejects(action("PUBLISH", "Different payload", 0, duplicateId), /REQUEST_ID_REUSED/);
+    const acceptedReceipt = await readHostIncidentReceipt({ ...base, reference: ref, requestId: duplicateId });
+    assert.equal(acceptedReceipt.status, "ACCEPTED");
+    assert.doesNotMatch(JSON.stringify(acceptedReceipt), /Private|text|contentCiphertext|actorId/);
+    assert.equal((await readHostIncidentReceipt({ ...base, reference: ref, requestId: randomUUID() })).status, "UNCONFIRMED");
+    await assert.rejects(readHostIncidentReceipt({ ...base, actor: { id: outsider.id, orgId: other.id }, reference: ref, requestId: duplicateId }), /NOT_FOUND/);
     const race = await Promise.allSettled([action("NOTE", "Concurrent A", 1), action("NOTE", "Concurrent B", 1)]);
     assert.equal(race.filter(r => r.status === "fulfilled").length, 1);
     assert.equal((await read()).version, 2);
