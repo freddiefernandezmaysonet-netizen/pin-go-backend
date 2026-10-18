@@ -122,7 +122,7 @@ test("startup config contains Live model, fixed voice, no audio format or tools"
   const c=salesVoiceStartupConfig();
   assert.equal(c.session.type,"live");
   assert.equal(c.session.model,"gpt-live-1");
-  assert.equal(c.session.audio.output.voice,"marin");
+  assert.equal(c.session.audio.output.voice,"meridian");
   const raw=JSON.stringify(c);
   assert.ok(raw.includes("inteligencia artificial"));
   assert.ok(!raw.includes('"format"'));
@@ -147,8 +147,8 @@ test("network adapter uses documented URL, POST, valid bearer auth and no retry"
     assert.equal(opening.content.length,1);
     assert.equal(opening.content[0].type,"input_text");
     assert.match(opening.content[0].text,/Saluda ahora en español e ingles, sin esperar/);
-    assert.match(opening.content[0].text,/soy el asistente de inteligencia artificial de Pin&Go/);
-    assert.match(opening.content[0].text,/Hello, I am Pin&Go.s AI assistant/);
+    assert.match(opening.content[0].text,/soy Pin, el asistente de inteligencia artificial de Pin&Go/);
+    assert.match(opening.content[0].text,/Hello, I am Pin, Pin&Go.s AI assistant/);
     assert.match(opening.content[0].text,/¿Prefieres español o inglés\?/);
     assert.match(opening.content[0].text,/Would you prefer Spanish or English\?/);
     assert.match(opening.content[0].text,/pausa y escucha/);
