@@ -21,6 +21,8 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     authenticatedAt: new Date(), lastActivityAt: new Date(), absoluteExpiresAt: new Date(Date.now() + 60000), revokedAt: revoked ? new Date() : null,
   });
   const calls = [];
+  const controls = []; let aiEnabled = true, mode = 'AUTO', sending = false;
+  const { InboxError } = await import('./host-inbox.ts');
   const receiptReads = [];
   const receiptLookup = prisma.channexHostMessageSend.findFirst;
   t.after(() => { prisma.channexHostMessageSend.findFirst = receiptLookup; });
@@ -36,10 +38,15 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
   prisma.hostMobileMessageRead.createMany = async args => {readWrites.push(args); return {count: 1};};
   const app = express(); app.use(express.json());
   app.use(buildDashboardChannexHostInboxRouter({ runtime: { async messages(scope, threadId, page) {
-    assert.equal(scope.organizationId, 'org'); assert.equal(scope.userId, 'host');
+    assert.equal(scope.organizationId, 'org'); if ('userId' in scope) assert.equal(scope.userId, 'host');
+    if (scope.propertyId === 'foreign') throw new InboxError('HOST_INBOX_PROPERTY_FORBIDDEN', 403);
     if (revokeDuringRead) revoked = true;
     return {items: [{id: messageId, sender: 'guest'}], thread: {id: threadId}, ...page, total: 1};
-  }, async reply(input) { calls.push(input); return { message: { id: 'synthetic' } }; } }, isTrustedOrigin: async () => false }));
+  }, async reply(input) { calls.push(input); return { message: { id: 'synthetic' } }; },
+    automation: {
+      async state() { return {enabled: aiEnabled, mode: aiEnabled ? mode : 'OFF', sending, reason: null}; },
+      async control(scope, next) { if (!aiEnabled) throw new InboxError('PIN_AI_AUTO_DISABLED',503); controls.push({...scope,mode:next}); mode=next; return {mode}; }
+    } }, isTrustedOrigin: async () => false }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const token = signSessionBoundAuthToken({ sub: 'host', orgId: 'org', email: 'test@example.invalid', role: 'ORG_ADMIN', tokenVersion: 2 }, 'session');
@@ -86,6 +93,39 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     assert.equal((await send({ headers: { cookie: 'unexpected=1' } })).status, 403);
     assert.equal((await send({ headers: { authorization: 'Bearer invalid.signature.token' } })).status, 401);
     assert.equal((await send({ suffix: 'messages' })).status, 403);
+    const controlUrl = `http://127.0.0.1:${server.address().port}/api/dashboard/channex-messages/properties/local/threads/${messageId}/mobile-pin-ai-control`;
+    async function control(method = 'GET', body, headers = {}, url = controlUrl) {
+      const response = await fetch(url, {method, headers: {...readHeaders, ...headers}, ...(body === undefined ? {} : {body:JSON.stringify(body)})});
+      return {status:response.status, body:await response.json()};
+    }
+    assert.deepEqual((await control()).body, {ok:true, propertyId:'local',threadId:messageId,automation:{enabled:true,mode:'AUTO',sending:false,reason:null}});
+    assert.equal((await control('POST',{mode:'HUMAN'})).body.automation.mode,'HUMAN');
+    assert.equal((await control('POST',{mode:'AUTO'})).body.automation.mode,'AUTO');
+    assert.deepEqual(controls.map(x=>x.mode),['HUMAN','AUTO']);
+    assert.ok(controls.every(x=>x.organizationId==='org' && x.propertyId==='local' && x.threadId===messageId));
+    assert.equal((await control('POST',{mode:'AUTO',organizationId:'other'})).status,400);
+    assert.equal((await control('POST',{mode:'OFF'})).status,400);
+    assert.equal((await control('POST',{mode:['AUTO']})).status,400);
+    assert.equal((await control('POST',{mode:'AUTO'},{origin:'https://app.pin-ngo.com'})).status,403);
+    assert.equal((await control('POST',{mode:'AUTO'},{cookie:'unexpected=1'})).status,403);
+    assert.equal((await control('POST',{mode:'AUTO'}, {}, controlUrl.replace('/local/','/foreign/'))).status,403);
+    const count = controls.length;
+    aiEnabled=false;
+    assert.equal((await control()).body.automation.mode,'OFF');
+    assert.equal((await control('POST',{mode:'AUTO'})).status,503);
+    assert.equal(controls.length,count);
+    aiEnabled=true; revoked=true;
+    assert.equal((await control('POST',{mode:'AUTO'})).status,401);
+    assert.equal(controls.length,count);
+    revoked=false; revokeDuringRead=true;
+    assert.equal((await control('POST',{mode:'AUTO'})).status,401);
+    assert.equal(controls.length,count);
+    revokeDuringRead=false; revoked=false;
+    delete process.env.HOST_MOBILE_REPLY_ENABLED;
+    assert.equal((await control()).status,503);
+    assert.equal((await control('POST',{mode:'AUTO'})).status,503);
+    assert.equal(controls.length,count);
+    process.env.HOST_MOBILE_REPLY_ENABLED='true';
     revoked = true;
     assert.equal((await send()).status, 401);
     revoked = false; unavailable = true;
@@ -99,3 +139,4 @@ test('mobile HTTP boundary verifies signed tokens and enforced sessions with the
     await prisma.$disconnect();
   }
 });
+

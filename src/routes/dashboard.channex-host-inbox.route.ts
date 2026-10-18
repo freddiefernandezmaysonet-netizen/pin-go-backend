@@ -96,6 +96,38 @@ export function buildDashboardChannexHostInboxRouter(args: {
         propertyId: req.params.propertyId!, threadId: req.params.threadId!, text: (body as { text: string }).text, requestKey: req.get("idempotency-key") ?? "" }) });
     } catch (error) { return failure(res, error); }
   });
+  // Native conversation handoff reuses the signed-session reply boundary and canonical automation policy.
+  const conversationScope = (req: HostRequest) => ({ organizationId: req.user!.orgId,
+    propertyId: req.params.propertyId!, threadId: req.params.threadId! });
+  const conversationState = async (scope: ReturnType<typeof conversationScope>) => {
+    const state = await args.runtime!.automation.state(scope);
+    return { propertyId: scope.propertyId, threadId: scope.threadId,
+      automation: { enabled: state.enabled, mode: state.mode, sending: state.sending, reason: state.reason } };
+  };
+  router.get(`${path}/:threadId/mobile-pin-ai-control`, async (req: HostRequest, res) => {
+    try {
+      await nativeAuthorization(req);
+      const scope = conversationScope(req);
+      await args.runtime!.messages(scope, scope.threadId, { page: 1, limit: 1 });
+      await nativeAuthorization(req);
+      return res.json({ ok: true, ...await conversationState(scope) });
+    } catch (error) { return failure(res, error); }
+  });
+  router.post(`${path}/:threadId/mobile-pin-ai-control`, async (req: HostRequest, res) => {
+    try {
+      await nativeAuthorization(req);
+      const body: unknown = req.body;
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+          Object.keys(body).length !== 1 || typeof (body as { mode?: unknown }).mode !== "string" ||
+          !["AUTO", "HUMAN"].includes((body as { mode: string }).mode))
+        throw new InboxError("PIN_AI_CONTROL_INVALID", 400);
+      const scope = conversationScope(req);
+      await args.runtime!.messages(scope, scope.threadId, { page: 1, limit: 1 });
+      await nativeAuthorization(req);
+      await args.runtime!.automation.control(scope, (body as { mode: "AUTO" | "HUMAN" }).mode);
+      return res.json({ ok: true, ...await conversationState(scope) });
+    } catch (error) { return failure(res, error); }
+  });
   router.post(`${path}/:threadId/pin-ai-control`, async (req: HostRequest, res) => {
     try {
       const raw = req.get("origin");
@@ -144,3 +176,4 @@ export function buildDashboardChannexHostInboxRouter(args: {
   });
   return router;
 }
+
