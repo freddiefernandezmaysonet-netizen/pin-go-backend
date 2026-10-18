@@ -26,5 +26,3 @@ export function buildHostMobileNotificationsRouter(input:{prisma:PrismaClient;en
   router.post(`${root}/inbox/read`,wrap(req=>inbox.markRead(actor(req),req.body)));
   return router;
 }
-
-

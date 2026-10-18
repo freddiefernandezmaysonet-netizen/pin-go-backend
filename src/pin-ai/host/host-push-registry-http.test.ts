@@ -39,4 +39,3 @@ test('push registry HTTP requires current native Host session and never returns 
   env.HOST_MOBILE_PUSH_REGISTRATION_ENABLED='false';assert.equal((await send()).status,503);assert.equal(writes,1);
   for(const path of ['/inbox','/inbox/read'])assert.equal((await inboxRequest(path)).status,503);
 });
-
