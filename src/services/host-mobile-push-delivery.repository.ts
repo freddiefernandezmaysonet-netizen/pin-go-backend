@@ -1,7 +1,6 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {Prisma, type PrismaClient, type HostMobilePushDelivery} from '@prisma/client';
-import {inspectBoundSession, type SessionEnforcementClient} from '../auth/session-enforcement-runtime.js';
-import {SESSION_ABSOLUTE_TIMEOUT_MS, SESSION_IDLE_TIMEOUT_MS} from '../auth/session-security.policy.js';
+import {permitsHostPushBinding} from './host-mobile-push-authorization.js';
 import {HOST_PUSH_PROJECT, type EncryptedHostPushDevice} from './host-mobile-push-token.js';
 import type {HostAttentionEvent, HostAttentionKind, HostPushPreference, HostPushRecipient} from './host-mobile-notification.policy.js';
 
@@ -142,10 +141,11 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
           organizationId_userId_propertyId_threadId_messageId: {organizationId: delivery.organizationId, userId: delivery.userId,
             propertyId: delivery.propertyId, threadId: source.threadId, messageId: source.messageId},
         }})) return null;
-        const session = await inspectBoundSession(tx as unknown as SessionEnforcementClient, {
-          sessionId: delivery.sessionId, userId: user.id, organizationId: user.organizationId, tokenVersion: user.tokenVersion, now,
-        });
-        if (!session.valid) return null;
+        const session = await tx.authSession.findUnique({where: {id: delivery.sessionId}});
+        if (!permitsHostPushBinding(session, {sessionId: delivery.sessionId, userId: user.id,
+          organizationId: user.organizationId, tokenVersion: user.tokenVersion}, now)) return null;
+        // activeSession in the shared notification policy means an authorized
+        // notification binding here; interactive HTTP authorization is unchanged.
         return {
           event: {id: delivery.eventId, organizationId: delivery.organizationId, propertyId: property.id,
             kind: delivery.kind as HostAttentionKind, actionRequired: true, state: 'ACTION_REQUIRED', severity: source.severity, occurredAt: delivery.occurredAt},
@@ -187,10 +187,8 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
               AND v."sessionId" = o."sessionId" AND v."organizationId" = o."organizationId" AND v."revokedAt" IS NULL
               AND v."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND v."projectId" = ${HOST_PUSH_PROJECT}
               AND v."platform" IN ('ios','android') AND u."isActive" = true AND u."role" IN ('ORG_ADMIN','ADMIN','PLATFORM_ADMIN')
-              AND s."revokedAt" IS NULL AND s."tokenVersion" = u."tokenVersion" AND s."absoluteExpiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+              AND s."revokedAt" IS NULL AND s."tokenVersion" = u."tokenVersion"
               AND s."authenticatedAt" <= s."lastActivityAt" AND s."lastActivityAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
-              AND s."lastActivityAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - ${SESSION_IDLE_TIMEOUT_MS} * INTERVAL '1 millisecond'
-              AND s."authenticatedAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - ${SESSION_ABSOLUTE_TIMEOUT_MS} * INTERVAL '1 millisecond'
               AND p."status" = 'ACTIVE' AND f."enabled" = true AND f."revision" = ${snapshot.preferenceRevision}
               AND o."kind" = ANY(f."kinds") AND i."visibility" = 'HOST' AND i."workflowState" = 'ACTION_REQUIRED'
               AND i."actionRequired" = true AND i."resolvedAt" IS NULL AND i."reopenedCount" = o."sourceEpoch"
