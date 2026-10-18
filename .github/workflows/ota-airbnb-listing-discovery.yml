@@ -45,6 +45,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref == 'agent/host-notification-inbox-20261018' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 

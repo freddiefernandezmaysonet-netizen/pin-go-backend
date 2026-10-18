@@ -52,3 +52,9 @@ jobs apply the actual inbox SQL to their populated base-schema databases and
 require full Prisma schema parity and preserved sales sentinels before their
 original regression suites. Six verifier tests cover positive and negative
 scope, schema, migration and checkout cases. No production operation is added.
+
+The reviewed base includes main's PR476 (0253da01); its voice farewell code is
+preserved unchanged. The Airbnb and main-voice jobs pin the exact inbox head for
+this branch so a later moving synthetic merge cannot silently change the tested
+tree. Their checkout behavior for all other branches is preserved. All runtime
+test steps remain intact; 47 remaining step definitions are unchanged.

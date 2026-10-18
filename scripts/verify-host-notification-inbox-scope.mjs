@@ -5,7 +5,7 @@ import {pathToFileURL} from 'node:url';
 
 // One reviewed additive inbox candidate. This does not change a commercial/OTA
 // allowlist or grant an exemption to another branch, fork, base or migration.
-export const BASE='10af8a39ff111fc0e3c484f512c5c876dbea5815';
+export const BASE='0253da0109ab5b1f925e4e26aa69f761b6e0c6d2';
 export const MIGRATION='prisma/migrations/20261018163000_host_notification_inbox/migration.sql';
 export const ALLOWED=[
   ".github/workflows/ota-airbnb-listing-discovery.yml",
