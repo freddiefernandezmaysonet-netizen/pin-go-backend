@@ -6,7 +6,7 @@ const registration={token:'ExpoPushToken[synthetic_token_123456789]',platform:'i
 const env={HOST_MOBILE_PUSH_TOKEN_KEY_ID:'test',HOST_MOBILE_PUSH_TOKEN_KEYS:JSON.stringify({test:'ab'.repeat(32)})};
 function fixture(){
   const devices=new Map<string,any>();let preference:any=null;
-  const db:any={hostMobilePushDevice:{upsert:async({where,create,update}:any)=>{devices.set(where.tokenHash,devices.has(where.tokenHash)?{...devices.get(where.tokenHash),...update}:create);},updateMany:async({where,data}:any)=>{let count=0;for(const [key,row]of devices)if(Object.entries(where).every(([k,v])=>(row[k]??null)===v)){devices.set(key,{...row,...data});count++;}return{count};}},
+  const db:any={hostMobilePushDevice:{findFirst:async({where,select}:any)=>{assert.deepEqual(select,{expiresAt:true});return [...devices.values()].find(row=>Object.entries(where).every(([k,v]:any)=>k==='expiresAt'?row[k]>v.gt:(row[k]??null)===v))??null;},upsert:async({where,create,update}:any)=>{devices.set(where.tokenHash,devices.has(where.tokenHash)?{...devices.get(where.tokenHash),...update}:create);},updateMany:async({where,data}:any)=>{let count=0;for(const [key,row]of devices)if(Object.entries(where).every(([k,v])=>(row[k]??null)===v)){devices.set(key,{...row,...data});count++;}return{count};}},
     hostMobilePushPreference:{findFirst:async({where}:any)=>preference&&preference.userId===where.userId&&preference.organizationId===where.organizationId?preference:null,findUnique:async()=>preference,create:async({data}:any)=>{preference=data;},updateMany:async({where,data}:any)=>{if(!preference||!Object.entries(where).every(([k,v])=>preference[k]===v))return{count:0};preference={...preference,...data};return{count:1};}}};
   db.$transaction=async(run:any)=>run(db);
   return{devices,registry:createHostPushRegistry(db,env),db};
@@ -19,6 +19,20 @@ test('account switch replaces token ownership and old session cannot revoke new 
   const f=fixture();await f.registry.register(actor,registration);await f.registry.register({...actor,id:'second-host',sessionId:'second-session'},registration);await f.registry.revokeSession(actor);
   let row=[...f.devices.values()][0];assert.equal(row.userId,'second-host');assert.equal(row.revokedAt,null);
   await f.registry.revokeSession({...actor,id:'second-host',sessionId:'second-session'});row=[...f.devices.values()][0];assert.ok(row.revokedAt instanceof Date);
+});
+test('status is read only and requires exact token, actor, session, platform, project and unexpired binding',async()=>{
+ const f=fixture(),now=new Date('2026-10-18T12:00:00Z');
+ const disconnected={device:{registered:false,expiresAt:null}};
+ assert.deepEqual(await f.registry.deviceStatus(actor,registration,now),disconnected);
+ await f.registry.register(actor,registration,now);
+ const row=[...f.devices.values()][0],before=JSON.stringify(row);
+ assert.deepEqual(await f.registry.deviceStatus(actor,registration,now),{device:{registered:true,expiresAt:'2026-11-17T12:00:00.000Z'}});
+ assert.equal(JSON.stringify(row),before);
+ for(const change of [{id:'other'},{orgId:'other'},{sessionId:'new-session'}])assert.deepEqual(await f.registry.deviceStatus({...actor,...change},registration,now),disconnected);
+ for(const change of [{token:'ExpoPushToken[other_synthetic_token_123456]'},{platform:'android'}])assert.deepEqual(await f.registry.deviceStatus(actor,{...registration,...change},now),disconnected);
+ assert.deepEqual(await f.registry.deviceStatus(actor,registration,new Date(row.expiresAt)),disconnected);
+ await f.registry.revokeSession(actor,now);assert.deepEqual(await f.registry.deviceStatus(actor,registration,now),disconnected);
+ assert.equal(JSON.stringify(await f.registry.deviceStatus(actor,registration,now)).includes(row.tokenHash),false);
 });
 test('missing encryption configuration and invalid scope/project token never write',async()=>{
   const f=fixture();await assert.rejects(createHostPushRegistry(f.db,{}).register(actor,registration),/PUSH_STORAGE_UNAVAILABLE/);assert.equal(f.devices.size,0);
@@ -36,3 +50,4 @@ test('preferences default off and use exact actor scope with version conflicts',
 test('preference parsing rejects invalid timezone, extra authority fields and quiet settings',()=>{
   for(const change of [{timezone:'Invalid/Timezone'},{expectedRevision:-1},{userId:'other'},{enabled:'yes'},{kinds:['UNLOCK']},{kinds:['GUEST_INCIDENT','GUEST_INCIDENT']},{quietHours:{startHour:8,endHour:8,allowCritical:false}}])assert.throws(()=>parsePushPreference({...preference,...change}),/INVALID/);
 });
+

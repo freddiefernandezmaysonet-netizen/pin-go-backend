@@ -12,7 +12,7 @@ test('push registry HTTP requires current native Host session and never returns 
   const originalUser=prisma.dashboardUser.findUnique,originalSession=(prisma as any).authSession.findUnique;
   prisma.dashboardUser.findUnique=user as any;(prisma as any).authSession.findUnique=session;
   t.after(()=>{prisma.dashboardUser.findUnique=originalUser;(prisma as any).authSession.findUnique=originalSession;});
-  const db:any={dashboardUser:{findUnique:user},authSession:{findUnique:session},hostMobilePushDevice:{upsert:async()=>{writes++;},updateMany:async()=>({count:0})},hostMobilePushPreference:{findFirst:async()=>null}};
+  const db:any={dashboardUser:{findUnique:user},authSession:{findUnique:session},hostMobilePushDevice:{findFirst:async()=>({expiresAt:new Date('2026-11-18T12:00:00Z')}),upsert:async()=>{writes++;},updateMany:async()=>({count:0})},hostMobilePushPreference:{findFirst:async()=>null}};
   const env={HOST_MOBILE_PUSH_REGISTRATION_ENABLED:'true',HOST_MOBILE_PUSH_TOKEN_KEY_ID:'test',HOST_MOBILE_PUSH_TOKEN_KEYS:JSON.stringify({test:'ab'.repeat(32)})};
   const app=express();app.use(express.json());app.use(buildHostMobileNotificationsRouter({prisma:db,env}));
   const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));
@@ -20,12 +20,14 @@ test('push registry HTTP requires current native Host session and never returns 
   const token=signSessionBoundAuthToken({sub:'host',orgId:'organization',email:'host@example.invalid',role:'ORG_ADMIN',tokenVersion:1},'session');
   const origin=`http://127.0.0.1:${(server.address() as any).port}/api/host-mobile/notifications`;
   const body={token:'ExpoPushToken[synthetic_token_123456789]',platform:'ios',projectId:'f7037a5c-4526-46d7-b7bb-fb56e2be2f8f'};
-  const send=async(headers:Record<string,string>={})=>{const r=await fetch(origin+'/devices',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...headers},body:JSON.stringify(body)});return{status:r.status,body:await r.json()};};
+  const send=async(headers:Record<string,string>={},path='/devices')=>{const r=await fetch(origin+path,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...headers},body:JSON.stringify(body)});return{status:r.status,body:await r.json()};};
   assert.deepEqual(await send(),{status:200,body:{ok:true,registered:true}});assert.equal(writes,1);
+  assert.deepEqual(await send({},'/devices/status'),{status:200,body:{ok:true,device:{registered:true,expiresAt:'2026-11-18T12:00:00.000Z'}}});assert.equal(writes,1);
   assert.equal((await send({Origin:'https://app.pin-ngo.com'})).status,403);assert.equal((await send({Cookie:'synthetic=1'})).status,403);
   assert.equal((await send({Authorization:'Bearer invalid'})).status,401);
-  revoked=true;assert.equal((await send()).status,401);revoked=false;
-  role='STAFF';assert.equal((await send()).status,403);role='ORG_ADMIN';
+  revoked=true;assert.equal((await send()).status,401);assert.equal((await send({},'/devices/status')).status,401);revoked=false;
+  role='STAFF';assert.equal((await send()).status,403);assert.equal((await send({},'/devices/status')).status,403);role='ORG_ADMIN';
   unavailable=true;assert.equal((await send()).status,503);unavailable=false;
   env.HOST_MOBILE_PUSH_REGISTRATION_ENABLED='false';assert.equal((await send()).status,503);assert.equal(writes,1);
 });
+

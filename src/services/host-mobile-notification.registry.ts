@@ -38,6 +38,14 @@ type Client=PrismaClient & {hostMobilePushDevice:any;hostMobilePushPreference:an
 export function createHostPushRegistry(db:PrismaClient,env:Env){
   const prisma=db as Client;
   return {
+    async deviceStatus(actor:PushActor,body:unknown,now=new Date()){
+      const input=parsePushRegistration(body),tokenHash=createHash('sha256').update(input.token).digest('hex');
+      // Exact token possession and current actor/session only. Never expose another
+      // binding, token, hash, ciphertext or device identifier, and never renew it.
+      const row=await prisma.hostMobilePushDevice.findFirst({where:{tokenHash,userId:actor.id,organizationId:actor.orgId,
+        sessionId:actor.sessionId,platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:{gt:now}},select:{expiresAt:true}});
+      return {device:{registered:!!row,expiresAt:row?row.expiresAt.toISOString():null}};
+    },
     async register(actor:PushActor,body:unknown,now=new Date()){
       const input=parsePushRegistration(body),tokenHash=createHash('sha256').update(input.token).digest('hex');
       const tokenCiphertext=sealToken(env,JSON.stringify([actor.orgId,actor.id,actor.sessionId,tokenHash]),input.token);
@@ -67,3 +75,4 @@ export function createHostPushRegistry(db:PrismaClient,env:Env){
     },
   };
 }
+

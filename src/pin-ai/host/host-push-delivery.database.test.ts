@@ -63,7 +63,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       assert.doesNotMatch(JSON.stringify(claims), /PRIVATE TITLE|PRIVATE BODY|ExpoPushToken|tokenCiphertext/);
       await clear();
     });
-    await t.test('dispatch denies changed role, tenant, tokenVersion, session revocation/expiry, property, source and preferences', async () => {
+    await t.test('dispatch denies changed role, tenant, tokenVersion, session revocation, device expiry, property, source and preferences', async () => {
       const source = await issue(); await enqueue();
       const row = (await repository.claim('SEND', 'guard-owner'))!;
       assert.ok(await repository.current(row));
@@ -72,8 +72,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
         [() => db.dashboardUser.update({where: {id: user.id}, data: {organizationId: other.id}}), () => db.dashboardUser.update({where: {id: user.id}, data: {organizationId: org.id}})],
         [() => db.dashboardUser.update({where: {id: user.id}, data: {tokenVersion: 1}}), () => db.dashboardUser.update({where: {id: user.id}, data: {tokenVersion: 0}})],
         [() => db.authSession.update({where: {id: session.id}, data: {revokedAt: new Date()}}), () => db.authSession.update({where: {id: session.id}, data: {revokedAt: null}})],
-        [() => db.authSession.update({where: {id: session.id}, data: {absoluteExpiresAt: new Date(Date.now() - 1)}}), () => db.authSession.update({where: {id: session.id}, data: {absoluteExpiresAt: session.absoluteExpiresAt}})],
-        [() => db.authSession.update({where: {id: session.id}, data: {lastActivityAt: new Date(now.getTime() - 31 * 60_000), authenticatedAt: new Date(now.getTime() - 35 * 60_000)}}), () => db.authSession.update({where: {id: session.id}, data: {lastActivityAt: session.lastActivityAt, authenticatedAt: session.authenticatedAt}})],
+        [() => db.hostMobilePushDevice.update({where: {id: device.id}, data: {expiresAt: new Date(Date.now() - 1)}}), () => db.hostMobilePushDevice.update({where: {id: device.id}, data: {expiresAt: device.expiresAt, updatedAt: device.updatedAt}})],
         [() => db.property.update({where: {id: property.id}, data: {organizationId: other.id}}), () => db.property.update({where: {id: property.id}, data: {organizationId: org.id}})],
         [() => db.operationalIssue.update({where: {id: source.id}, data: {workflowState: 'RESOLVED', actionRequired: false}}), () => db.operationalIssue.update({where: {id: source.id}, data: {workflowState: 'ACTION_REQUIRED', actionRequired: true}})],
       ];
@@ -97,6 +96,37 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       await db.operationalIssue.update({where: {id: source.id}, data: {reopenedCount: {increment: 1}}});
       assert.equal(await enqueue(), 1, 'a new incident episode has a distinct durable identity');
       await clear();
+    });
+    await t.test('unattended push survives idle and absolute HTTP deadlines but never revocation', async () => {
+      for (const age of [31 * 60_000, 13 * 3600_000]) {
+        const authenticatedAt = new Date(Date.now() - age - 60_000);
+        const lastActivityAt = new Date(Date.now() - age);
+        await db.authSession.update({where: {id: session.id}, data: {
+          authenticatedAt, lastActivityAt, absoluteExpiresAt: new Date(Date.now() - 1), revokedAt: null,
+        }});
+        await issue(); await enqueue();
+        const row = (await repository.claim('SEND', 'unattended'))!;
+        const snapshot = (await repository.current(row))!;
+        assert.ok(snapshot, 'registered device remains authorized while app is idle');
+        assert.equal(await repository.arm(row, snapshot), true, 'atomic fence uses device lifetime too');
+        assert.equal((await db.authSession.findUniqueOrThrow({where: {id: session.id}})).lastActivityAt.getTime(), lastActivityAt.getTime());
+        await clear();
+      }
+      for (const revokeReason of ['LOGOUT', 'IDLE_TIMEOUT', 'ABSOLUTE_TIMEOUT', 'SECURITY_REVOKED']) {
+        await db.authSession.update({where: {id: session.id}, data: {revokedAt: null, revokeReason: null}});
+        await issue(); await enqueue();
+        const row = (await repository.claim('SEND', 'revocation'))!;
+        const snapshot = (await repository.current(row))!;
+        assert.ok(snapshot);
+        await db.authSession.update({where: {id: session.id}, data: {revokedAt: new Date(), revokeReason}});
+        assert.equal(await repository.current(row), null);
+        assert.equal(await repository.arm(row, snapshot), false, 'revocation after snapshot blocks network send');
+        await clear();
+      }
+      await db.authSession.update({where: {id: session.id}, data: {
+        authenticatedAt: session.authenticatedAt, lastActivityAt: session.lastActivityAt,
+        absoluteExpiresAt: session.absoluteExpiresAt, revokedAt: null, revokeReason: null,
+      }});
     });
     await t.test('pre-send leases can recover but stale owners cannot arm; rebindings invalidate old work', async () => {
       await issue(); await enqueue(); const old = (await repository.claim('SEND', 'old-owner'))!;

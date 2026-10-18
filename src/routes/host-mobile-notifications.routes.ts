@@ -17,8 +17,10 @@ export function buildHostMobileNotificationsRouter(input:{prisma:PrismaClient;en
   const wrap=(fn:(req:Request)=>Promise<unknown>):RequestHandler=>async(req,res)=>{try{res.json({ok:true,...await fn(req) as object});}catch(error){res.status(error instanceof HostPushRegistryError?error.status:503).json({ok:false,error:error instanceof HostPushRegistryError?error.code:'HOST_PUSH_REGISTRY_UNAVAILABLE'});}};
   router.use(root,enabled,requireAuth,native,createReviewRateLimit({namespace:'host-push-registry',max:30,windowMs:60000,key:reviewActorClientKey}));
   router.post(`${root}/devices`,wrap(req=>registry.register(actor(req),req.body)));
+  router.post(`${root}/devices/status`,wrap(req=>registry.deviceStatus(actor(req),req.body)));
   router.delete(`${root}/devices/session`,wrap(req=>registry.revokeSession(actor(req))));
   router.get(`${root}/preferences`,wrap(async req=>({preference:await registry.preference(actor(req))})));
   router.put(`${root}/preferences`,wrap(req=>registry.savePreference(actor(req),req.body)));
   return router;
 }
+
