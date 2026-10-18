@@ -106,7 +106,10 @@ jobs:
           const signupDomain = [".github/workflows/sales-voice-commercial-service-v1.yml", ".github/workflows/sales-voice-live-sip-mount-v1.yml", "src/services/sales-voice-answer-backend.service.ts", "src/services/sales-voice-commercial.service.test.ts", "src/services/sales-voice-commercial.service.ts", "src/services/sales-voice-live-admission.service.ts", "src/services/sales-voice-pricing.service.ts", "src/services/sales-voice-product-knowledge.service.ts", "src/services/sales-voice-tool-loop.service.ts"];
           const farewellStream = [".github/workflows/sales-voice-live-sip-mount-v1.yml", "src/services/sales-voice-farewell.service.test.ts", "src/services/sales-voice-farewell.service.ts"];
           const commercialKnowledge = [".github/workflows/sales-voice-live-sip-mount-v1.yml", ".github/workflows/sales-voice-main-integration-certification.yml", "docs/sales-voice-knowledge-audit-20261015.md", "src/services/sales-voice-answer-backend.service.ts", "src/services/sales-voice-detailed-knowledge.service.ts", "src/services/sales-voice-product-knowledge.service.test.ts", "src/services/sales-voice-product-knowledge.service.ts", "src/services/sales-voice-tool-contract.service.ts", "src/services/sales-voice-tool-executor.service.test.ts", "src/services/sales-voice-tool-executor.service.ts"];
-          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-commercial-knowledge-20261015'
+          const pinMeridian = [".github/workflows/sales-voice-live-sip-mount-v1.yml", "src/services/sales-voice-answer-backend.service.ts", "src/services/sales-voice-live-admission.service.test.ts", "src/services/sales-voice-live-admission.service.ts"];
+          const selected = process.env.GITHUB_HEAD_REF === 'agent/sales-voice-pin-meridian-20261018'
+            ? pinMeridian
+            : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-commercial-knowledge-20261015'
             ? commercialKnowledge
             : process.env.GITHUB_HEAD_REF === 'agent/sales-voice-farewell-stream-20261015'
             ? farewellStream

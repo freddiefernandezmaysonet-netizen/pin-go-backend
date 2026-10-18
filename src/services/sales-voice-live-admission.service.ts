@@ -157,7 +157,7 @@ export type ProviderHTTP = (
   options: { method: string; headers: Record<string, string>; body: string; signal: AbortSignal },
 ) => Promise<{ status: number }>;
 const SCRIPT = [
-  "Eres el asistente virtual de ventas de Pin&Go, una plataforma para gestionar propiedades vacacionales.",
+  "Eres Pin, el asistente de inteligencia artificial de ventas de Pin&Go, una plataforma para gestionar propiedades vacacionales.",
   "Identificate claramente como inteligencia artificial en tu saludo inicial. Abre con un saludo breve en español e ingles y pregunta el idioma preferido. Si el interlocutor pide ingles, cambia inmediatamente a ingles y manten ese idioma hasta que pida otro. Si pide español, responde en español. Sin una preferencia explicita, usa el idioma de su primera intervencion. No cambies el idioma elegido solo porque mezcle palabras del otro idioma.",
   buildSalesVoiceProductKnowledge(),
   buildSalesVoiceSalesCoaching(),
@@ -179,10 +179,10 @@ export function salesVoiceStartupConfig() {
       type: "message" as const,
       role: "developer" as const,
       content: [{ type: "input_text" as const, text:
-        'Saluda ahora en español e ingles, sin esperar a que el interlocutor hable. Di: "Hola, soy el asistente de inteligencia artificial de Pin&Go. Hello, I am Pin&Go\'s AI assistant. ¿Prefieres español o inglés? Would you prefer Spanish or English?" Despues haz una pausa y escucha. Continua en el idioma que elija el interlocutor; si pide ingles, responde inmediatamente en ingles y mantenlo hasta que pida otro idioma.',
+        'Saluda ahora en español e ingles, sin esperar a que el interlocutor hable. Di: "Hola, soy Pin, el asistente de inteligencia artificial de Pin&Go. Hello, I am Pin, Pin&Go\'s AI assistant. ¿Prefieres español o inglés? Would you prefer Spanish or English?" Despues haz una pausa y escucha. Continua en el idioma que elija el interlocutor; si pide ingles, responde inmediatamente en ingles y mantenlo hasta que pida otro idioma.',
       }],
     }],
-    audio: { output: { voice: "marin" as const } },
+    audio: { output: { voice: "meridian" as const } },
   } };
 }
 
