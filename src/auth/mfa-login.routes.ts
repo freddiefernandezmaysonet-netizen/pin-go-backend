@@ -14,6 +14,7 @@ import {
 } from "./trusted-device-session.persistence.js";
 import { buildAuthCookie } from "../lib/auth.js";
 import { buildTrustedDeviceCookie } from "./trusted-device-cookie.js";
+import { isNativeTrustedDeviceTransport, mobileTrustedDevicePayload } from "./mobile-trusted-device.js";
 import { signSessionBoundAuthToken } from "./session-bound-token.js";
 
 const prisma = new PrismaClient();
@@ -206,13 +207,15 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
 
     let trustedDeviceId: string | null = null;
     let trustedDeviceCookie: string | null = null;
+    let mobileTrustedDevice: { token: string; expiresAt: Date } | null = null;
 
     if (trustDevice) {
       const trusted = await createTrustedDevice(prisma as any, {
         userId: user.id,
-        label: "Trusted browser",
+        label: isNativeTrustedDeviceTransport(req) ? "Trusted mobile device" : "Trusted browser",
         userAgent: req.get("user-agent") ?? null,
       });
+      mobileTrustedDevice = trusted;
       trustedDeviceId = trusted.trustedDeviceId;
       trustedDeviceCookie = buildTrustedDeviceCookie(trusted.token);
 
@@ -275,6 +278,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     ];
     res.setHeader("Set-Cookie", cookies);
 
+    res.setHeader("Cache-Control", "no-store");
     return res.json({
       ok: true,
       ...(isMobileAuthClient(req) ? { mobileSessionToken: token } : {}),
@@ -287,9 +291,11 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
         organizationSlug: user.organization?.slug ?? null,
       },
       trustedDevice: Boolean(trustedDeviceId),
+      ...mobileTrustedDevicePayload(req, mobileTrustedDevice),
     });
   } catch (error) {
     console.error("[auth/mfa/verify] ERROR", error);
     return res.status(500).json({ error: "MFA_VERIFY_FAILED" });
   }
 });
+
