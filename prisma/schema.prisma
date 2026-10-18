@@ -3755,6 +3755,7 @@ model HostMobilePushDelivery {
   updatedAt DateTime @updatedAt
 
   @@unique([sourceId, sourceEpoch, deviceId, userId], map: "HostMobilePushDelivery_source_device_user_key")
+  @@index([organizationId, userId, occurredAt(sort: Desc)], map: "HostMobilePushDelivery_inbox_idx")
   @@index([state, availableAt])
   @@index([leaseUntil])
   @@index([organizationId, userId])
@@ -3770,5 +3771,17 @@ model HostMobileMessageRead {
   readAt DateTime @default(now())
 
   @@id([organizationId, userId, propertyId, threadId, messageId], map: "HostMobileMessageRead_scope_key")
+  @@index([readAt])
+}
+
+// Inbox acknowledgement is independent of guest-message reads and issue resolution.
+model HostMobileNotificationRead {
+  organizationId String
+  userId String
+  propertyId String
+  eventId String
+  readAt DateTime @default(now())
+
+  @@id([organizationId, userId, propertyId, eventId], map: "HostMobileNotificationRead_scope_key")
   @@index([readAt])
 }

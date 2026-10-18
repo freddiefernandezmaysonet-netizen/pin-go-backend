@@ -6,8 +6,9 @@ import {verifySessionBoundAuthToken} from '../auth/session-bound-token.js';
 import {guardAuthenticatedSession} from '../auth/session-request-guard.js';
 import {createReviewRateLimit,reviewActorClientKey} from '../services/reviews/review-route-security.js';
 import {createHostPushRegistry,HostPushRegistryError,type PushActor} from '../services/host-mobile-notification.registry.js';
+import {createHostNotificationInbox} from '../services/host-mobile-notification-inbox.js';
 export function buildHostMobileNotificationsRouter(input:{prisma:PrismaClient;env:Readonly<Record<string,string|undefined>>}){
-  const router=Router(),root='/api/host-mobile/notifications',registry=createHostPushRegistry(input.prisma,input.env);
+  const router=Router(),root='/api/host-mobile/notifications',registry=createHostPushRegistry(input.prisma,input.env),inbox=createHostNotificationInbox(input.prisma);
   const enabled:RequestHandler=(_req,res,next)=>{res.setHeader('Cache-Control','no-store');if(input.env.HOST_MOBILE_PUSH_REGISTRATION_ENABLED!=='true'){res.status(503).json({ok:false,error:'HOST_PUSH_REGISTRATION_DISABLED'});return;}next();};
   const native:RequestHandler=async(req,res,next)=>{
     try{await authorizeMobileReply({enabled:true,authorization:req.get('authorization'),origin:req.get('origin'),cookie:req.get('cookie'),identity:(req as Request&{user?:AuthenticatedUser}).user},{verify:verifySessionBoundAuthToken,guard:args=>guardAuthenticatedSession(input.prisma as any,args)});next();}
@@ -21,6 +22,9 @@ export function buildHostMobileNotificationsRouter(input:{prisma:PrismaClient;en
   router.delete(`${root}/devices/session`,wrap(req=>registry.revokeSession(actor(req))));
   router.get(`${root}/preferences`,wrap(async req=>({preference:await registry.preference(actor(req))})));
   router.put(`${root}/preferences`,wrap(req=>registry.savePreference(actor(req),req.body)));
+  router.get(`${root}/inbox`,wrap(req=>inbox.list(actor(req),req.query)));
+  router.post(`${root}/inbox/read`,wrap(req=>inbox.markRead(actor(req),req.body)));
   return router;
 }
+
 

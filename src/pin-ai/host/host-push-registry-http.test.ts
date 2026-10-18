@@ -28,6 +28,15 @@ test('push registry HTTP requires current native Host session and never returns 
   revoked=true;assert.equal((await send()).status,401);assert.equal((await send({},'/devices/status')).status,401);revoked=false;
   role='STAFF';assert.equal((await send()).status,403);assert.equal((await send({},'/devices/status')).status,403);role='ORG_ADMIN';
   unavailable=true;assert.equal((await send()).status,503);unavailable=false;
+  const inboxRequest=async(path:string,headers:Record<string,string>={})=>fetch(origin+path,{method:path.endsWith('/read')?'POST':'GET',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',...headers},...(path.endsWith('/read')?{body:JSON.stringify({eventId:'event',propertyId:'property'})}:{})});
+  for(const path of ['/inbox','/inbox/read']) {
+    assert.equal((await inboxRequest(path,{Authorization:'Bearer invalid'})).status,401);
+    assert.equal((await inboxRequest(path,{Origin:'https://app.pin-ngo.com'})).status,403);
+    assert.equal((await inboxRequest(path,{Cookie:'synthetic=1'})).status,403);
+    revoked=true;assert.equal((await inboxRequest(path)).status,401);revoked=false;
+    role='STAFF';assert.equal((await inboxRequest(path)).status,403);role='ORG_ADMIN';
+  }
   env.HOST_MOBILE_PUSH_REGISTRATION_ENABLED='false';assert.equal((await send()).status,503);assert.equal(writes,1);
+  for(const path of ['/inbox','/inbox/read'])assert.equal((await inboxRequest(path)).status,503);
 });
 
