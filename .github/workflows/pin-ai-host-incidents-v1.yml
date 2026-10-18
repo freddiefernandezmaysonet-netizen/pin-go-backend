@@ -6,6 +6,7 @@ on:
       - "src/pin-ai/**"
       - "src/services/host-mobile-notification.policy*"
       - "src/services/host-mobile-notification.registry.ts"
+      - "src/services/host-mobile-notification-inbox.ts"
       - "src/services/host-mobile-push-*"
       - "src/workers/host-mobile-push.worker.ts"
       - "tsconfig.host-mobile-push.json"
@@ -86,6 +87,10 @@ jobs:
             npx prisma db execute --file "$push_migration" --schema prisma/schema.prisma
           fi
           npx prisma generate
+          inbox_migration=prisma/migrations/20261018163000_host_notification_inbox/migration.sql
+          if ! git cat-file -e "$BASE_SHA:$inbox_migration" 2>/dev/null; then
+            npx prisma db execute --file "$inbox_migration" --schema prisma/schema.prisma
+          fi
       - name: Host foundation unit and PostgreSQL API tests
         run: node --import tsx --test src/pin-ai/host/*.test.ts src/services/host-mobile-notification.policy.test.ts src/services/host-mobile-push-*.test.ts
       - name: Strict typecheck and emitted build

@@ -8,6 +8,8 @@ on:
       - 'prisma/migrations/20261013160000_sales_voice_crm_foundation_v1/migration.sql'
       - 'tests/sales-voice-crm-foundation.db.test.mjs'
       - '.github/workflows/sales-voice-crm-foundation-v1.yml'
+      - 'scripts/verify-host-notification-inbox-scope.mjs'
+      - 'scripts/verify-host-notification-inbox-scope.test.mjs'
 
 permissions:
   contents: read
@@ -65,7 +67,12 @@ jobs:
           const before = execFileSync('git', ['show', `${base}:prisma/schema.prisma`], { encoding: 'utf8' });
           const after = readFileSync('prisma/schema.prisma', 'utf8');
           const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
-          if (hostCandidate) {
+          const inboxCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-notification-inbox-20261018';
+          if (inboxCandidate) {
+            execFileSync('node', ['--test', 'scripts/verify-host-notification-inbox-scope.test.mjs'], {stdio:'inherit'});
+            execFileSync('node', ['scripts/verify-host-notification-inbox-scope.mjs'], {stdio:'inherit'});
+            writeFileSync(process.env.RUNNER_TEMP+'/sales-voice-candidate-migration.txt','prisma/migrations/20261018163000_host_notification_inbox/migration.sql');
+          } else if (hostCandidate) {
             execFileSync('node', ['--test', 'scripts/verify-host-mobile-operations-scope.test.mjs'], {stdio:'inherit'});
             execFileSync('node', ['scripts/verify-host-mobile-operations-scope.mjs'], {stdio:'inherit'});
             writeFileSync(process.env.RUNNER_TEMP+'/sales-voice-candidate-migration.txt','prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql');

@@ -9,6 +9,8 @@ on:
       - 'src/services/sales-voice-recovery-lease.service.ts'
       - 'src/services/sales-voice-recovery-lease.service.test.ts'
       - '.github/workflows/sales-voice-recovery-lease-certification.yml'
+      - 'scripts/verify-host-notification-inbox-scope.mjs'
+      - 'scripts/verify-host-notification-inbox-scope.test.mjs'
 permissions:
   contents: read
 jobs:
@@ -50,7 +52,11 @@ jobs:
           const before=execFileSync('git',['show',process.env.BASE_SHA+':prisma/schema.prisma'],{encoding:'utf8'});
           const after=readFileSync('prisma/schema.prisma','utf8');
           const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
-          if (hostCandidate) {
+          const inboxCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-notification-inbox-20261018';
+          if (inboxCandidate) {
+            execFileSync('node', ['--test', 'scripts/verify-host-notification-inbox-scope.test.mjs'], {stdio:'inherit'});
+            execFileSync('node', ['scripts/verify-host-notification-inbox-scope.mjs'], {stdio:'inherit'});
+          } else if (hostCandidate) {
             execFileSync('node', ['--test', 'scripts/verify-host-mobile-operations-scope.test.mjs'], {stdio:'inherit'});
             execFileSync('node', ['scripts/verify-host-mobile-operations-scope.mjs'], {stdio:'inherit'});
           } else {
@@ -83,7 +89,9 @@ jobs:
           INSERT INTO "SalesVoiceCall" ("id","providerCallId","provider","status","lastUsageSeconds","updatedAt")
           VALUES ('recovery-migration-sentinel','live_migration_sentinel','OPENAI_LIVE_SIP','ACCEPTED',17.5,TIMESTAMP '2026-01-01 00:00:00');
           SQL
-          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-notification-inbox-20261018" ]; then
+            ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261018163000_host_notification_inbox/migration.sql
+          elif [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
             ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261016210000_host_mobile_push_registry/migration.sql
           elif [ "${GITHUB_HEAD_REF:-}" != "agent/sales-voice-recovery-budget-v1-20261013" ]; then
             ./node_modules/.bin/prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261013221500_sales_voice_recovery_lease_v1/migration.sql

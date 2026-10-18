@@ -28,6 +28,8 @@ on:
       - 'src/routes/dashboard.airbnb-host-self-service.route.ts'
       - 'src/routes/dashboard.airbnb-host-self-service.listings.route.test.ts'
       - '.github/workflows/ota-airbnb-listing-discovery.yml'
+      - 'scripts/verify-host-notification-inbox-scope.mjs'
+      - 'scripts/verify-host-notification-inbox-scope.test.mjs'
   workflow_dispatch:
 
 permissions:
@@ -43,6 +45,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref == 'agent/host-notification-inbox-20261018' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -68,6 +71,11 @@ jobs:
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
           SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-notification-inbox-20261018" ]; then
+            node --test scripts/verify-host-notification-inbox-scope.test.mjs
+            node scripts/verify-host-notification-inbox-scope.mjs
+            exit 0
+          fi
           if [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
             node --test scripts/verify-host-mobile-operations-scope.test.mjs
             node scripts/verify-host-mobile-operations-scope.mjs

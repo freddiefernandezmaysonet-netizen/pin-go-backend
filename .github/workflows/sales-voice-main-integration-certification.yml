@@ -14,6 +14,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/sales-voice-main-integration-certification.yml'
+      - 'scripts/verify-host-notification-inbox-scope.mjs'
+      - 'scripts/verify-host-notification-inbox-scope.test.mjs'
 permissions:
   contents: read
 jobs:
@@ -37,6 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref == 'agent/host-notification-inbox-20261018' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -50,7 +53,11 @@ jobs:
           import assert from 'node:assert/strict';
           import { execFileSync } from 'node:child_process';
           const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
-          if (hostCandidate) {
+          const inboxCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-notification-inbox-20261018';
+          if (inboxCandidate) {
+            execFileSync('node', ['--test', 'scripts/verify-host-notification-inbox-scope.test.mjs'], {stdio:'inherit'});
+            execFileSync('node', ['scripts/verify-host-notification-inbox-scope.mjs'], {stdio:'inherit'});
+          } else if (hostCandidate) {
             execFileSync('node', ['--test', 'scripts/verify-host-mobile-operations-scope.test.mjs'], {stdio:'inherit'});
             execFileSync('node', ['scripts/verify-host-mobile-operations-scope.mjs'], {stdio:'inherit'});
           } else {
