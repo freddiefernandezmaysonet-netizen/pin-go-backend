@@ -34,3 +34,21 @@ pagination, duplicate-device handling, exact read persistence and scope checks i
 isolated embedded PostgreSQL (PGlite, UTC). Real Prisma/PostgreSQL integration and
 native simulator UI run in the PR workflows. Production migration/deployment and a
 new physical build remain outside this preparation. Automatic push stays off.
+
+## Cross-feature CI scope
+
+PR475 also supplies a pinned inbox verifier for the four commercial/Airbnb
+certifications that trigger on schema changes. It accepts only this repository,
+PR, branch, reviewed base, exact changed-file set, appended read model, ledger
+index and additive SQL. It rejects forks, other branches/bases, extra runtime
+files, destructive SQL and edits to every pre-existing schema definition.
+The checkout must have the exact candidate tree. Explicit git freezes cover
+sales services/tests, OTA distribution/transports, PMS, workers and server.
+
+Only the initial feature-scope check selects this independent verification.
+Existing commercial/Airbnb allowlists are unchanged. Every downstream fingerprint,
+typecheck, runtime and PostgreSQL contract remains enabled. CRM and recovery
+jobs apply the actual inbox SQL to their populated base-schema databases and
+require full Prisma schema parity and preserved sales sentinels before their
+original regression suites. Six verifier tests cover positive and negative
+scope, schema, migration and checkout cases. No production operation is added.
