@@ -37,7 +37,7 @@ new physical build remain outside this preparation. Automatic push stays off.
 
 ## Cross-feature CI scope
 
-PR475 also supplies a pinned inbox verifier for the four commercial/Airbnb
+PR475 also supplies a pinned inbox verifier for the six commercial/Airbnb
 certifications that trigger on schema changes. It accepts only this repository,
 PR, branch, reviewed base, exact changed-file set, appended read model, ledger
 index and additive SQL. It rejects forks, other branches/bases, extra runtime

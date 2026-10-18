@@ -11,6 +11,8 @@ on:
       - 'src/services/sales-voice-live-sip-mount.service.ts'
       - 'src/services/sales-voice-live-sip-mount.service.test.ts'
       - '.github/workflows/sales-voice-live-sip-mount-v1.yml'
+      - 'scripts/verify-host-notification-inbox-scope.mjs'
+      - 'scripts/verify-host-notification-inbox-scope.test.mjs'
 
 permissions:
   contents: read
@@ -35,7 +37,10 @@ jobs:
           cache: npm
       - name: Enforce exact five-file integration scope
         run: |
-          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/host-notification-inbox-20261018" ]; then
+            node --test scripts/verify-host-notification-inbox-scope.test.mjs
+            node scripts/verify-host-notification-inbox-scope.mjs
+          elif [ "${GITHUB_HEAD_REF:-}" = "agent/host-mobile-operations-20261016" ]; then
             node --test scripts/verify-host-mobile-operations-scope.test.mjs
             node scripts/verify-host-mobile-operations-scope.mjs
           else

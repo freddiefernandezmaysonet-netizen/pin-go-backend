@@ -9,8 +9,10 @@ export const BASE='10af8a39ff111fc0e3c484f512c5c876dbea5815';
 export const MIGRATION='prisma/migrations/20261018163000_host_notification_inbox/migration.sql';
 export const ALLOWED=[
   ".github/workflows/ota-airbnb-listing-discovery.yml",
+  ".github/workflows/ota-initial-distribution-enablement.yml",
   ".github/workflows/pin-ai-host-incidents-v1.yml",
   ".github/workflows/sales-voice-crm-foundation-v1.yml",
+  ".github/workflows/sales-voice-live-sip-mount-v1.yml",
   ".github/workflows/sales-voice-main-integration-certification.yml",
   ".github/workflows/sales-voice-recovery-lease-certification.yml",
   "docs/host-notification-inbox.md",
