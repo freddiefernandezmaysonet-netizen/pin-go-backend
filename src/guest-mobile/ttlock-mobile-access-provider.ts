@@ -4,6 +4,14 @@ import { decryptMobileAccessSecret, encryptMobileAccessSecret } from "./mobile-a
 import { getOrgTtlockAccessToken } from "../services/ttlock/ttlock.org-auth.js";
 import type { MobileAccessProvider, MobileAccessProviderCredential, MobileAccessProviderIssueInput } from "./mobile-access-provider.js";
 
+function providerFailure(stage: string, error: unknown): never {
+  const response = axios.isAxiosError(error) ? error.response : undefined;
+  const status = Number(response?.status);
+  const rawCode = response?.data?.errcode;
+  const code = typeof rawCode === "number" && Number.isInteger(rawCode) ? String(rawCode) : "UNKNOWN";
+  throw new Error(`TTLOCK_${stage}_HTTP_${Number.isInteger(status) ? status : "UNKNOWN"}_CODE_${code}`);
+}
+
 const BASE_URL = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
 
 function clientId() {
@@ -85,7 +93,7 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
       !identity.tokenKeyVersion
     ) throw new Error("TTLOCK_RECIPIENT_NOT_READY");
 
-    const ownerAccessToken = await getOrgTtlockAccessToken(this.prisma, this.organizationId);
+    const ownerAccessToken = await getOrgTtlockAccessToken(this.prisma, this.organizationId).catch(error => providerFailure("OWNER_AUTH", error));
     const send = await axios.post(`${BASE_URL}/v3/key/send`, null, {
       params: {
         clientId: clientId(),
@@ -96,11 +104,11 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
         startDate: input.startsAt.getTime(),
         endDate: input.endsAt.getTime(),
         remoteEnable: 2,
-        createUser: 0,
+        createUser: 2,
         date: Date.now(),
       },
       timeout: 15000,
-    });
+    }).catch(error => providerFailure("EKEY_SEND", error));
 
     const providerKeyId = String(send.data?.keyId ?? "");
     if (!providerKeyId) throw new Error("TTLOCK_EKEY_SEND_INCOMPLETE");
@@ -115,7 +123,7 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
         date: Date.now(),
       },
       timeout: 15000,
-    });
+    }).catch(error => providerFailure("EKEY_DETAIL", error));
 
     const lockData = String(detail.data?.lockData ?? "");
     const lockMac = String(detail.data?.lockMac ?? "");
