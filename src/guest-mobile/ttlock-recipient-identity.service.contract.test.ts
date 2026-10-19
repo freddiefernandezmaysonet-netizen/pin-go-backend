@@ -11,9 +11,9 @@ test("recipient username is opaque and derived only from GuestPerson id plus ser
   assert.doesNotMatch(source, /guestEmail|guestPhone|reservationNumber|propertyId|guestName/);
 });
 
-test("recipient email domain is server configuration, not hardcoded personal email", () => {
-  assert.match(source, /TTLOCK_RECIPIENT_EMAIL_DOMAIN/);
-  assert.match(source, /guest-\$\{opaqueLocalPart\(guestPersonId\)\}/);
+test("recipient username contains only letters and digits, without an email domain", () => {
+  assert.ok(source.includes('const username = `guest${opaqueLocalPart(guestPersonId)}`'));
+  assert.doesNotMatch(source, /TTLOCK_RECIPIENT_EMAIL_DOMAIN/);
 });
 
 test("existing non-deleted GuestPerson identity is reused", () => {
@@ -28,3 +28,4 @@ test("deleted identity may be reactivated as PENDING without exposing old provid
   assert.match(source, /registeredAt: null/);
   assert.match(source, /deletedAt: null/);
 });
+

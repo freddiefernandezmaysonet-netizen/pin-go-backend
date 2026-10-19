@@ -2,12 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { encryptMobileAccessSecret } from "./mobile-access-crypto.service.js";
 
-function recipientDomain() {
-  const value = String(process.env.TTLOCK_RECIPIENT_EMAIL_DOMAIN ?? "").trim().toLowerCase();
-  if (!value || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) throw new Error("TTLOCK_RECIPIENT_EMAIL_DOMAIN_NOT_CONFIGURED");
-  return value;
-}
-
 function opaqueLocalPart(guestPersonId: string) {
   const salt = String(process.env.TTLOCK_RECIPIENT_USERNAME_SALT ?? "").trim();
   if (salt.length < 32) throw new Error("TTLOCK_RECIPIENT_USERNAME_SALT_NOT_CONFIGURED");
@@ -21,7 +15,7 @@ export async function resolveOrCreateTTLockRecipientIdentity(
   const existing = await prisma.tTLockRecipientIdentity.findUnique({ where: { guestPersonId } });
   if (existing && existing.status !== "DELETED") return existing;
 
-  const username = `guest-${opaqueLocalPart(guestPersonId)}@${recipientDomain()}`;
+  const username = `guest${opaqueLocalPart(guestPersonId)}`;
   const bootstrapSecret = randomBytes(32).toString("base64url");
   const encrypted = encryptMobileAccessSecret(
     bootstrapSecret,
@@ -55,3 +49,4 @@ export async function resolveOrCreateTTLockRecipientIdentity(
     },
   });
 }
+
