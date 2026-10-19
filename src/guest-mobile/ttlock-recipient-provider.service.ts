@@ -1,7 +1,7 @@
 import axios from "axios";
 import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { encryptMobileAccessSecret } from "./mobile-access-crypto.service.js";
+import { decryptMobileAccessSecret, encryptMobileAccessSecret } from "./mobile-access-crypto.service.js";
 
 const BASE_URL = process.env.TTLOCK_API_BASE ?? "https://api.sciener.com";
 
@@ -31,21 +31,50 @@ export async function registerAndAuthenticateTTLockRecipient(
   }
 
   const { clientId, clientSecret } = clientCredentials();
-  const password = generateTTLockRecipientPassword();
+  if (!["PENDING", "FAILED"].includes(identity.status)) throw new Error("TTLOCK_RECIPIENT_NOT_REGISTERABLE");
+  if (!identity.passwordCiphertext || !identity.passwordKeyVersion) throw new Error("TTLOCK_RECIPIENT_PASSWORD_MISSING");
+  let password: string;
+  try {
+    password = decryptMobileAccessSecret(identity.passwordCiphertext, identity.passwordKeyVersion, identityAad(identity.id, "password"));
+  } catch {
+    // Older failed registrations discarded their actual provider password. Never
+    // silently overwrite/reset a remote account with an unrelated bootstrap secret.
+    if (identity.status !== "PENDING" || identity.registeredAt) throw new Error("TTLOCK_RECIPIENT_RECOVERY_REQUIRED");
+    password = decryptMobileAccessSecret(identity.passwordCiphertext, identity.passwordKeyVersion,
+      `mobile-access:ttlock-recipient:v1:pending:${identity.guestPersonId}:bootstrap`);
+    const saved = encryptMobileAccessSecret(password, identityAad(identity.id, "password"));
+    await prisma.tTLockRecipientIdentity.update({ where: { id: identity.id }, data: {
+      passwordCiphertext: saved.ciphertext, passwordKeyVersion: saved.keyVersion,
+    } });
+  }
   const passwordMd5 = createHash("md5").update(password, "utf8").digest("hex");
   const date = Date.now();
 
   try {
-    await axios.post(`${BASE_URL}/v3/user/register`, null, {
-      params: { clientId, clientSecret, username: identity.username, password: passwordMd5, date },
-      timeout: 15000,
-    });
+    let username = identity.username;
+    if (!identity.registeredAt) {
+      const registration = await axios.post(`${BASE_URL}/v3/user/register`, null, {
+        params: { clientId, clientSecret, username, password: passwordMd5, date },
+        timeout: 15000,
+      });
+      if (registration.data?.errcode != null && Number(registration.data.errcode) !== 0) {
+        throw new Error("TTLOCK_RECIPIENT_REGISTER_REJECTED");
+      }
+      if (typeof registration.data?.username !== "string" || !registration.data.username.trim()) {
+        throw new Error("TTLOCK_RECIPIENT_REGISTER_INCOMPLETE");
+      }
+      username = registration.data.username.trim();
+      // Persist the canonical username before OAuth so token failures can retry.
+      await prisma.tTLockRecipientIdentity.update({ where: { id: identity.id }, data: {
+        username, registeredAt: new Date(),
+      } });
+    }
 
     const token = await axios.post(`${BASE_URL}/oauth2/token`, new URLSearchParams({
-      clientId,
-      clientSecret,
-      username: identity.username,
-      password,
+      client_id: clientId,
+      client_secret: clientSecret,
+      username,
+      password: passwordMd5,
       grant_type: "password",
     }), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -86,10 +115,14 @@ export async function registerAndAuthenticateTTLockRecipient(
 
     return { identityId: identity.id, reused: false as const };
   } catch (error) {
+    // Do not persist Axios messages/config: they can contain credentials.
+    const code = error instanceof Error && /^TTLOCK_RECIPIENT_[A-Z_]+$/.test(error.message)
+      ? error.message : "TTLOCK_RECIPIENT_AUTH_FAILED";
     await prisma.tTLockRecipientIdentity.update({
       where: { id: identity.id },
-      data: { status: "FAILED", lastError: error instanceof Error ? error.message.slice(0, 500) : "TTLOCK_RECIPIENT_REGISTER_FAILED" },
+      data: { status: "FAILED", lastError: code },
     });
-    throw error;
+    throw new Error(code);
   }
 }
+

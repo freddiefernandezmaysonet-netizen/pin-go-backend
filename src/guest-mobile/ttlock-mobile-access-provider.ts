@@ -39,8 +39,8 @@ async function resolveRecipientAccessToken(prisma: PrismaClient, identity: {
   if (!credentials.clientSecret) throw new Error("TTLOCK_CLIENT_SECRET_MISSING");
 
   const token = await axios.post(`${BASE_URL}/oauth2/token`, new URLSearchParams({
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
+    client_id: credentials.clientId,
+    client_secret: credentials.clientSecret,
     refresh_token: refreshToken,
     grant_type: "refresh_token",
   }), { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 15000 });
@@ -141,3 +141,4 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
     });
   }
 }
+
