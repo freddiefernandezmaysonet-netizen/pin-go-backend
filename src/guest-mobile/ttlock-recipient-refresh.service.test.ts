@@ -21,7 +21,9 @@ test('expired recipient token refresh uses OAuth snake_case credentials', async 
  refreshed = true; return { data: { access_token: 'new', refresh_token: 'next', expires_in: 3600 } };
  });
  t.mock.method(axios, 'get', async (_url: string, config: any) => {
- assert.equal(config.params.accessToken, 'new'); return { data: { lockData: 'data', lockMac: 'mac', startDate: 1, endDate: 2 } };
+ assert.equal(config.params.accessToken, 'new');
+ assert.equal(config.params.lockId, 1);
+ assert.equal(Object.hasOwn(config.params, 'keyId'), false); return { data: { lockData: 'data', lockMac: 'mac', startDate: 1, endDate: 2 } };
  });
  await new TTLockMobileAccessProvider(prisma, 'org', 'identity').issueTimeboundKey({ providerLockId: 1, recipient: 'canonical', startsAt: new Date(1), endsAt: new Date(2) });
  assert.equal(refreshed, true);
