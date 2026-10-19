@@ -119,7 +119,7 @@ export class TTLockMobileAccessProvider implements MobileAccessProvider {
       params: {
         clientId: clientId(),
         accessToken: recipientAccessToken,
-        keyId: providerKeyId,
+        lockId: input.providerLockId,
         date: Date.now(),
       },
       timeout: 15000,
