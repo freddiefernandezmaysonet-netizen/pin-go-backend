@@ -13,7 +13,7 @@ const aad = 'mobile-access:ttlock-recipient:v1:identity:password';
 const md5 = createHash('md5').update(password).digest('hex');
 function fixture(status = 'PENDING', saved = false) {
  const enc = encryptMobileAccessSecret(password, saved ? aad : 'mobile-access:ttlock-recipient:v1:pending:person:bootstrap');
- const row: any = { id: 'identity', guestPersonId: 'person', username: 'opaque@example.test', status,
+ const row: any = { id: 'identity', guestPersonId: 'person', username: 'guest09c125b187fbf9f55a94f2b639f2d9f7', status,
  passwordCiphertext: enc.ciphertext, passwordKeyVersion: enc.keyVersion, registeredAt: null };
  const prisma: any = { tTLockRecipientIdentity: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => Object.assign(row, data) } };
  return { row, run: () => registerAndAuthenticateTTLockRecipient(prisma, { identityId: row.id, username: row.username }) };
@@ -61,4 +61,24 @@ test('active identity reuses tokens', async t => {
 test('delete-pending identity cannot register', async t => {
  const f = fixture('DELETE_PENDING', true); const post = t.mock.method(axios, 'post', async () => { throw new Error('must not call'); });
  await assert.rejects(f.run(), /NOT_REGISTERABLE/); assert.equal(post.mock.callCount(), 0);
+});
+
+test('normalizes rejected legacy username without changing saved password', async t => {
+ const f = fixture('FAILED', true);
+ f.row.username = 'guest-09c125b187fbf9f55a94f2b639f2d9f7@pin-ngo.com';
+ t.mock.method(axios, 'post', async (url: string, body: any, config: any) => {
+ if (url.endsWith('/register')) {
+ assert.equal(config.params.username, 'guest09c125b187fbf9f55a94f2b639f2d9f7');
+ assert.equal(config.params.password, md5);
+ assert.equal(f.row.username, config.params.username);
+ return { data: { username: 'providerCanonical' } };
+ }
+ assert.equal(body.get('username'), 'providerCanonical'); return { data: tokens };
+ });
+ await f.run(); assert.equal(f.row.status, 'ACTIVE');
+});
+test('does not normalize a legacy identity with provider evidence', async t => {
+ const f = fixture('FAILED', true); f.row.username = 'guest-09c125b187fbf9f55a94f2b639f2d9f7@pin-ngo.com'; f.row.providerUid = '123';
+ const post = t.mock.method(axios, 'post', async () => { throw new Error('must not call'); });
+ await assert.rejects(f.run(), /RECOVERY_REQUIRED/); assert.equal(post.mock.callCount(), 0);
 });

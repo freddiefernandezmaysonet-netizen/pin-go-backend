@@ -53,6 +53,17 @@ export async function registerAndAuthenticateTTLockRecipient(
   try {
     let username = identity.username;
     if (!identity.registeredAt) {
+      // The old generated email-shaped name is invalid for cloud registration.
+      // Normalize only our exact legacy format, never a registered account.
+      const legacy = /^guest-([a-f0-9]{32})@[a-z0-9.-]+\.[a-z]{2,}$/i.exec(username);
+      if (legacy) {
+        if (identity.providerUid || identity.accessTokenCiphertext || identity.refreshTokenCiphertext) {
+          throw new Error("TTLOCK_RECIPIENT_RECOVERY_REQUIRED");
+        }
+        username = `guest${legacy[1].toLowerCase()}`;
+        await prisma.tTLockRecipientIdentity.update({ where: { id: identity.id }, data: { username } });
+      }
+      if (!/^[a-zA-Z0-9]+$/.test(username)) throw new Error("TTLOCK_RECIPIENT_USERNAME_INVALID");
       const registration = await axios.post(`${BASE_URL}/v3/user/register`, null, {
         params: { clientId, clientSecret, username, password: passwordMd5, date },
         timeout: 15000,
