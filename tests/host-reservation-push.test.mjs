@@ -19,11 +19,12 @@ test('reservation capture, deduplication, cancellation, consent, tenant isolatio
  CREATE TABLE "HostMobilePushDevice" (id text,"userId" text,"organizationId" text,"sessionId" text,"updatedAt" timestamp,"bindingVersion" int,"revokedAt" timestamp,"expiresAt" timestamp,"projectId" text,platform text);
  CREATE TABLE "DashboardUser" (id text,"organizationId" text,"isActive" boolean,role text,"tokenVersion" int);
  CREATE TABLE "AuthSession" (id text,"userId" text,"organizationId" text,"revokedAt" timestamp,"tokenVersion" int,"authenticatedAt" timestamp,"lastActivityAt" timestamp);
+ ALTER TABLE "AuthSession" ADD COLUMN "revokeReason" text;
  CREATE TABLE "HostMobilePushPreference" ("userId" text,"organizationId" text,enabled boolean,kinds text[],timezone text,revision int,"quietStartHour" int,"quietEndHour" int,"allowCritical" boolean);
  CREATE TABLE "HostMobilePushDelivery" (id text PRIMARY KEY,"sourceId" text,"sourceEpoch" int,"organizationId" text,"propertyId" text,"userId" text,"sessionId" text,"deviceId" text,"deviceUpdatedAt" timestamp,"deviceBindingVersion" int,kind text,"occurredAt" timestamp,"expiresAt" timestamp,"eventId" text,"acceptedAt" timestamp,state text DEFAULT 'QUEUED',"leaseOwner" text,"leaseEpoch" int DEFAULT 0,"leaseUntil" timestamp,attempts int DEFAULT 0,"updatedAt" timestamp DEFAULT now(), UNIQUE ("sourceId","sourceEpoch","deviceId","userId"));
  INSERT INTO "HostMobilePushDevice" VALUES ('device','user','org','session',now(),1,null,now()+interval '10 days','f7037a5c-4526-46d7-b7bb-fb56e2be2f8f','ios');
  INSERT INTO "DashboardUser" VALUES ('user','org',true,'ORG_ADMIN',1);
- INSERT INTO "AuthSession" VALUES ('session','user','org',null,1,now(),now());
+ INSERT INTO "AuthSession" VALUES ('session','user','org',null,1,now(),now(),null);
  INSERT INTO "HostMobilePushPreference" VALUES ('user','org',true,ARRAY['NEW_RESERVATION'],'UTC',1,null,null,false);
  `);
  await pg.exec(await readFile(new URL('../prisma/migrations/20261020190000_host_reservation_notification/migration.sql',import.meta.url),'utf8'));
@@ -55,6 +56,19 @@ test('reservation capture, deduplication, cancellation, consent, tenant isolatio
  const snapshot=await repo.current(delivery);assert.equal(snapshot.event.state,'INFORMATIONAL');
  await pg.exec(`UPDATE "HostMobilePushDelivery" SET state='CLAIMED',"leaseOwner"='test',"leaseEpoch"=1,"leaseUntil"=now()+interval '1 minute' WHERE id='${delivery.id}'`);
  const claimed={...delivery,leaseOwner:'test',leaseEpoch:1};
+ for (const reason of ['IDLE_TIMEOUT','ABSOLUTE_TIMEOUT']) {
+   await pg.query(`UPDATE "AuthSession" SET "revokedAt"=now(),"revokeReason"=$1`,[reason]);
+   assert.ok(await repo.current(delivery),'timeout preserves push authorization');
+   assert.equal(await repo.arm(claimed,snapshot),true,'timeout permits final send boundary');
+   await pg.exec(`UPDATE "HostMobilePushDelivery" SET state='CLAIMED'`);
+ }
+ for (const reason of ['LOGOUT','ADMIN_REVOKED','INVALID_TIMELINE']) {
+   await pg.query(`UPDATE "AuthSession" SET "revokeReason"=$1`,[reason]);
+   assert.equal(await repo.current(delivery),null,'explicit revocation blocks snapshot');
+   assert.equal(await repo.arm(claimed,snapshot),false,'explicit revocation blocks final send');
+ }
+ await pg.exec(`UPDATE "AuthSession" SET "revokedAt"=null,"revokeReason"=null`);
+
  await pg.exec(`UPDATE "HostMobilePushPreference" SET enabled=false`);
  assert.equal(await repo.arm(claimed,snapshot),false,'opt-out after snapshot fences send');
  await pg.exec(`UPDATE "HostMobilePushPreference" SET enabled=true; UPDATE "Reservation" SET status='CANCELLED' WHERE id='direct'`);

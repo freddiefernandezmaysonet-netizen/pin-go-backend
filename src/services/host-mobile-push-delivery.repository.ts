@@ -196,7 +196,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
               AND v."sessionId" = o."sessionId" AND v."organizationId" = o."organizationId" AND v."revokedAt" IS NULL
               AND v."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND v."projectId" = ${HOST_PUSH_PROJECT}
               AND v."platform" IN ('ios','android') AND u."isActive" = true AND u."role" IN ('ORG_ADMIN','ADMIN','PLATFORM_ADMIN')
-              AND s."revokedAt" IS NULL AND s."tokenVersion" = u."tokenVersion"
+              AND (s."revokedAt" IS NULL OR s."revokeReason" IN ('IDLE_TIMEOUT','ABSOLUTE_TIMEOUT')) AND s."tokenVersion" = u."tokenVersion"
               AND s."authenticatedAt" <= s."lastActivityAt" AND s."lastActivityAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
               AND p."status" = 'ACTIVE' AND f."enabled" = true AND f."revision" = ${snapshot.preferenceRevision}
               AND o."kind" = ANY(f."kinds") AND i."visibility" = 'HOST'

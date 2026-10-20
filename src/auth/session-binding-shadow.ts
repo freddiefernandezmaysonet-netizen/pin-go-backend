@@ -185,7 +185,8 @@ export async function revokeBoundSessionOnLogout(
       userId: input.userId,
       organizationId: input.organizationId,
       tokenVersion: input.tokenVersion,
-      revokedAt: null,
+      // A voluntary logout must also terminate push access after an HTTP timeout.
+      OR: [{ revokedAt: null }, { revokeReason: { in: ["IDLE_TIMEOUT", "ABSOLUTE_TIMEOUT"] } }],
     },
     data: {
       revokedAt: now,
