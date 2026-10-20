@@ -22,6 +22,7 @@ export function buildHostMobileNotificationsRouter(input:{prisma:PrismaClient;en
   router.delete(`${root}/devices/session`,wrap(req=>registry.revokeSession(actor(req))));
   router.get(`${root}/preferences`,wrap(async req=>({preference:await registry.preference(actor(req))})));
   router.put(`${root}/preferences`,wrap(req=>registry.savePreference(actor(req),req.body)));
+  router.get(`${root}/reservation`,wrap(req=>inbox.reservation(actor(req),req.query)));
   router.get(`${root}/inbox`,wrap(req=>inbox.list(actor(req),req.query)));
   router.post(`${root}/inbox/read`,wrap(req=>inbox.markRead(actor(req),req.body)));
   return router;

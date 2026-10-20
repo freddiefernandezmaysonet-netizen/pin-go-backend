@@ -2,7 +2,7 @@ import { createCipheriv, createHash, randomBytes, randomUUID } from 'node:crypto
 import type { PrismaClient } from '@prisma/client';
 import type { HostAttentionKind } from './host-mobile-notification.policy.js';
 const PROJECT = 'f7037a5c-4526-46d7-b7bb-fb56e2be2f8f';
-const kinds: HostAttentionKind[] = ['GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCEPTION','ACCESS_EXCEPTION'];
+const kinds: HostAttentionKind[] = ['NEW_RESERVATION','GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCEPTION','ACCESS_EXCEPTION'];
 export class HostPushRegistryError extends Error { constructor(readonly status:number,readonly code:string){super(code);} }
 const fail=(status:number,code:string):never=>{throw new HostPushRegistryError(status,code);};
 export type PushActor={id:string;orgId:string;sessionId:string};

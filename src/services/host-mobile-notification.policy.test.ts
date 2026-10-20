@@ -31,3 +31,16 @@ test('dedupe identity is stable and isolates actors and events',()=>{
   assert.equal(a.status,'PREPARED');if(a.status!=='PREPARED'||b.status!=='PREPARED'||c.status!=='PREPARED')return;
   assert.deepEqual(prepare(event,recipient,preference,now),a);assert.notEqual(a.deduplicationKey,b.deduplicationKey);assert.notEqual(a.deduplicationKey,c.deduplicationKey);
 });
+
+test('new reservations are informational and respect opt-out, scope and quiet hours',()=>{
+ const e:HostAttentionEvent={...event,kind:'NEW_RESERVATION',state:'INFORMATIONAL',actionRequired:false,severity:'INFO'};
+ const p:HostPushPreference={...preference,kinds:['NEW_RESERVATION']};
+ const prepared=prepare(e,recipient,p,now);
+ assert.equal(prepared.status,'PREPARED');
+ if(prepared.status==='PREPARED'){assert.equal(prepared.payload.title,'New reservation');assert.equal(prepared.payload.data.target,'reservation');}
+ assert.equal(prepare(e,recipient,preference,now).status,'SKIP');
+ assert.equal(prepare(e,{...recipient,organizationId:'other'},p,now).status,'SKIP');
+ assert.equal(prepare({...e,state:'RESOLVED'},recipient,p,now).status,'SKIP');
+ const night=new Date('2026-10-17T03:00:00Z');
+ assert.equal(prepare({...e,occurredAt:night},recipient,p,night).status,'DEFER');
+});

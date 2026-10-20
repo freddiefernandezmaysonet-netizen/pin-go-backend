@@ -1,7 +1,7 @@
 import {Prisma, type PrismaClient} from '@prisma/client';
 import {HostPushRegistryError, type PushActor} from './host-mobile-notification.registry.js';
 
-const kinds = ['GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCEPTION','ACCESS_EXCEPTION'];
+const kinds = ['NEW_RESERVATION','GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCEPTION','ACCESS_EXCEPTION'];
 const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(v);
 const invalid = (): never => {throw new HostPushRegistryError(400,'NOTIFICATION_INBOX_INVALID');};
 type Cursor = {at: string; eventId: string; propertyId: string};
@@ -43,6 +43,20 @@ function history(actor:PushActor) {
 }
 export function createHostNotificationInbox(db:PrismaClient) {
   return {
+    async reservation(actor:PushActor,query:unknown) {
+      const {eventId,propertyId}=parseInboxRead(query);
+      const rows=await db.$queryRaw<{reservationId:string}[]>(Prisma.sql`
+        SELECT DISTINCT r."id" AS "reservationId" FROM "HostMobilePushDelivery" d
+        JOIN "HostMobileReservationEvent" e ON d."sourceId"='reservation:' || e."reservationId"
+          AND e."organizationId"=d."organizationId" AND e."propertyId"=d."propertyId"
+        JOIN "Reservation" r ON r."id"=e."reservationId" AND r."propertyId"=e."propertyId"
+        JOIN "Property" p ON p."id"=r."propertyId" AND p."organizationId"=d."organizationId" AND p."status"='ACTIVE'
+        WHERE d."organizationId"=${actor.orgId} AND d."userId"=${actor.id}
+          AND d."eventId"=${eventId} AND d."propertyId"=${propertyId} AND d."kind"='NEW_RESERVATION'
+          AND d."acceptedAt" IS NOT NULL AND d."occurredAt">(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')-INTERVAL '30 days'`);
+      if(rows.length!==1)throw new HostPushRegistryError(404,'NOTIFICATION_NOT_FOUND');
+      return {reservationId:rows[0]!.reservationId,propertyId};
+    },
     async list(actor:PushActor,query:unknown) {
       const {unread,cursor}=parseInboxQuery(query);
       return db.$transaction(async tx=>{
