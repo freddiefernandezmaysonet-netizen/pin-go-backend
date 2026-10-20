@@ -1,8 +1,8 @@
 // Pure preparation policy only. No registration, provider call or notification is performed here.
-export type HostAttentionKind = 'GUEST_INCIDENT' | 'GUEST_MESSAGE' | 'CLEANING_EXCEPTION' | 'ACCESS_EXCEPTION';
+export type HostAttentionKind = 'NEW_RESERVATION' | 'GUEST_INCIDENT' | 'GUEST_MESSAGE' | 'CLEANING_EXCEPTION' | 'ACCESS_EXCEPTION';
 export type HostAttentionEvent = {
   id: string; organizationId: string; propertyId: string; kind: HostAttentionKind;
-  actionRequired: boolean; state: 'ACTION_REQUIRED' | 'WAITING' | 'AUTO_RESOLVING' | 'RESOLVED';
+  actionRequired: boolean; state: 'INFORMATIONAL' | 'ACTION_REQUIRED' | 'WAITING' | 'AUTO_RESOLVING' | 'RESOLVED';
   severity: 'INFO' | 'WARNING' | 'CRITICAL'; occurredAt: Date;
 };
 export type HostPushPreference = {
@@ -10,9 +10,9 @@ export type HostPushPreference = {
   quietHours: { startHour: number; endHour: number; allowCritical: boolean } | null;
 };
 export type HostPushRecipient = { userId: string; organizationId: string; role: string; activeSession: boolean; allowedPropertyIds: readonly string[] };
-type Target = 'incidents' | 'messages' | 'cleanings' | 'access';
-const targets: Record<HostAttentionKind, Target> = { GUEST_INCIDENT: 'incidents', GUEST_MESSAGE: 'messages', CLEANING_EXCEPTION: 'cleanings', ACCESS_EXCEPTION: 'access' };
-const titles: Record<HostAttentionKind, string> = { GUEST_INCIDENT: 'Guest incident needs attention', GUEST_MESSAGE: 'Guest message needs attention', CLEANING_EXCEPTION: 'Cleaning needs attention', ACCESS_EXCEPTION: 'Access needs attention' };
+type Target = 'reservation' | 'incidents' | 'messages' | 'cleanings' | 'access';
+const targets: Record<HostAttentionKind, Target> = { NEW_RESERVATION: 'reservation', GUEST_INCIDENT: 'incidents', GUEST_MESSAGE: 'messages', CLEANING_EXCEPTION: 'cleanings', ACCESS_EXCEPTION: 'access' };
+const titles: Record<HostAttentionKind, string> = { NEW_RESERVATION: 'New reservation', GUEST_INCIDENT: 'Guest incident needs attention', GUEST_MESSAGE: 'Guest message needs attention', CLEANING_EXCEPTION: 'Cleaning needs attention', ACCESS_EXCEPTION: 'Access needs attention' };
 const validId = (value: string) => /^[A-Za-z0-9_-]{1,200}$/.test(value);
 export function prepareHostAttentionNotification(event: HostAttentionEvent, recipient: HostPushRecipient, preference: HostPushPreference, now: Date) {
   const skip = (reason: string) => ({ status: 'SKIP' as const, reason });
@@ -22,7 +22,7 @@ export function prepareHostAttentionNotification(event: HostAttentionEvent, reci
   if (!recipient.activeSession || !['ORG_ADMIN','ADMIN','PLATFORM_ADMIN'].includes(recipient.role) ||
       recipient.organizationId !== event.organizationId || !recipient.allowedPropertyIds.includes(event.propertyId)) return skip('ACCESS_DENIED');
   if (!preference.enabled || !preference.kinds.includes(event.kind)) return skip('OPTED_OUT');
-  if (!event.actionRequired || event.state !== 'ACTION_REQUIRED') return skip('NO_HOST_ACTION');
+  if (event.kind === 'NEW_RESERVATION' ? event.state !== 'INFORMATIONAL' : !event.actionRequired || event.state !== 'ACTION_REQUIRED') return skip('NO_HOST_ACTION');
   // A stale or future signal must be re-evaluated from authoritative state, never blindly delivered.
   const age = now.getTime() - event.occurredAt.getTime();
   if (age < 0 || age > 24 * 60 * 60_000) return skip('STALE_SIGNAL');

@@ -1,4 +1,5 @@
 import {buildHostPushMessageVerifier} from '../services/host-mobile-push-messages.js';
+import {setTimeout as delay} from 'node:timers/promises';
 import {pathToFileURL} from 'node:url';
 import {hostPushDeliveryConfig, runHostPushDeliveryCycle} from '../services/host-mobile-push-delivery.service.js';
 import {createHostPushDeliveryRepository, maintainHostPushRecords} from '../services/host-mobile-push-delivery.repository.js';
@@ -13,7 +14,7 @@ export async function runOnce(env: Readonly<Record<string, string | undefined>>)
   try {
     const verifyMessage = buildHostPushMessageVerifier(db, env);
     return await runHostPushDeliveryCycle({env, verifyMessage,
-      repository: createHostPushDeliveryRepository(db, !!verifyMessage), provider: () => provider});
+      repository: createHostPushDeliveryRepository(db, !!verifyMessage, env.HOST_MOBILE_PUSH_RESERVATIONS_ENABLED === 'true'), provider: () => provider});
   }
   finally { await db.$disconnect(); }
 }
@@ -31,10 +32,25 @@ export async function runMaintenance(env: Readonly<Record<string, string | undef
   try { return {enabled: true, ...await maintainHostPushRecords(db, ids)}; }
   finally { await db.$disconnect(); }
 }
+// Serial cycles: no overlap and no automatic replay of uncertain sends.
+export async function runLoop(env: Readonly<Record<string,string|undefined>>, signal: AbortSignal,
+  cycle = runOnce, pause = (signal:AbortSignal)=>delay(15000,undefined,{signal})) {
+  if (!hostPushDeliveryConfig(env).enabled) throw Error('HOST_PUSH_LOOP_DISABLED');
+  while (!signal.aborted) {
+    try {
+      const result=await cycle(env);
+      if(result.processed || result.enqueued)console.log('[HOST_PUSH_CYCLE]',result);
+    } catch {console.error('[HOST_PUSH_CYCLE] unavailable');}
+    if(!signal.aborted)await pause(signal).catch(error=>{if(!signal.aborted)throw error;});
+  }
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (!['--once', '--maintenance-once'].includes(process.argv[2] ?? '') || process.argv.length !== 3) throw Error('HOST_PUSH_EXPLICIT_ONCE_REQUIRED');
-  // Only sanitized aggregate counts. No device, ticket, actor, event or error text.
-  (process.argv[2] === '--maintenance-once' ? runMaintenance(process.env) : runOnce(process.env)).then(result => console.log('[HOST_PUSH_CYCLE]', result)).catch(() => {
-    console.error('[HOST_PUSH_CYCLE] unavailable'); process.exitCode = 1;
-  });
+  if (!['--once', '--maintenance-once', '--loop'].includes(process.argv[2] ?? '') || process.argv.length !== 3) throw Error('HOST_PUSH_EXPLICIT_MODE_REQUIRED');
+  const controller=new AbortController();
+  const stop=()=>controller.abort();
+  process.once('SIGTERM',stop);process.once('SIGINT',stop);
+  const work=process.argv[2]==='--loop'?runLoop(process.env,controller.signal):
+    (process.argv[2] === '--maintenance-once' ? runMaintenance(process.env) : runOnce(process.env)).then(result => console.log('[HOST_PUSH_CYCLE]', result));
+  work.catch(() => {console.error('[HOST_PUSH_CYCLE] unavailable'); process.exitCode = 1;})
+    .finally(()=>{process.removeListener('SIGTERM',stop);process.removeListener('SIGINT',stop);});
 }

@@ -24,10 +24,11 @@ export type HostPushDeliveryRepository = {
   finish(delivery: Delivery, outcome: DeliveryFinish): Promise<boolean>;
 };
 
-const kindSql = Prisma.sql`CASE WHEN i."engine" = 'HOST_PUSH_INBOUND' THEN 'GUEST_MESSAGE' WHEN i."engine" = 'PIN_AI_GUEST_INCIDENT' THEN 'GUEST_INCIDENT'
+const kindSql = Prisma.sql`CASE WHEN i."engine" = 'HOST_RESERVATION' THEN 'NEW_RESERVATION' WHEN i."engine" = 'HOST_PUSH_INBOUND' THEN 'GUEST_MESSAGE' WHEN i."engine" = 'PIN_AI_GUEST_INCIDENT' THEN 'GUEST_INCIDENT'
   WHEN i."actionTarget" = 'CLEANING' THEN 'CLEANING_EXCEPTION'
   WHEN i."actionTarget" = 'ACCESS' THEN 'ACCESS_EXCEPTION' ELSE NULL END`;
 function issueKind(source: {engine: string; actionTarget: string}): HostAttentionKind | null {
+  if (source.engine === 'HOST_RESERVATION') return 'NEW_RESERVATION';
   if (source.engine === 'HOST_PUSH_INBOUND') return 'GUEST_MESSAGE';
   if (source.engine === 'PIN_AI_GUEST_INCIDENT') return 'GUEST_INCIDENT';
   if (source.actionTarget === 'CLEANING') return 'CLEANING_EXCEPTION';
@@ -38,11 +39,18 @@ function issueKind(source: {engine: string; actionTarget: string}): HostAttentio
 
 // Normalize only canonical NEEDS_HOST inputs; no outbound failure is a message.
 // This optional view is never queried when inbound push is disabled.
-function attentionSources(messagesEnabled: boolean) {
-  const issues = Prisma.sql`SELECT "id", "reopenedCount", "organizationId", "propertyId", "engine", "actionTarget"::text,
+function attentionSources(messagesEnabled: boolean, reservationsEnabled: boolean) {
+  let issues = Prisma.sql`SELECT "id", "reopenedCount", "organizationId", "propertyId", "engine", "actionTarget"::text,
     "visibility"::text, "workflowState"::text, "actionRequired", "resolvedAt", "severity"::text, "lastSignalAt",
     NULL::text AS "threadId", NULL::text AS "messageId", NULL::timestamp AS "sourceRevision", NULL::timestamp AS "threadRevision"
     FROM "OperationalIssue"`;
+  if (reservationsEnabled) issues = Prisma.sql`${issues} UNION ALL
+    SELECT 'reservation:' || e."reservationId", 0, e."organizationId", e."propertyId",
+      'HOST_RESERVATION', 'RESERVATION', 'HOST', 'INFORMATIONAL', false, NULL::timestamp, 'INFO', e."occurredAt",
+      NULL::text, NULL::text, NULL::timestamp, NULL::timestamp
+    FROM "HostMobileReservationEvent" e JOIN "Reservation" r ON r."id"=e."reservationId" AND r."propertyId"=e."propertyId"
+    WHERE e."occurredAt" IS NOT NULL AND r."status"='ACTIVE' AND r."checkOut">(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+      AND (COALESCE(r."source", '') <> 'DIRECT_BOOKING' AND COALESCE(r."externalProvider", '') <> 'PIN_GO_DIRECT' OR r."paymentState"='PAID')`;
   if (!messagesEnabled) return Prisma.sql`(${issues})`;
   return Prisma.sql`(${issues} UNION ALL SELECT 'inbound:' || m."id", 0, m."organizationId", m."propertyId",
     'HOST_PUSH_INBOUND', 'MESSAGING', 'HOST', 'ACTION_REQUIRED', true, NULL::timestamp, 'INFO', m."receivedAt",
@@ -52,8 +60,8 @@ function attentionSources(messagesEnabled: boolean) {
     WHERE m."status" = 'NEEDS_HOST' AND t."mode" = 'HUMAN' AND t."sending" = false
       AND m."leaseToken" IS NULL AND t."leaseToken" IS NULL)`;
 }
-export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabled = false): HostPushDeliveryRepository {
-  const sources = attentionSources(messagesEnabled);
+export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabled = false, reservationsEnabled = false): HostPushDeliveryRepository {
+  const sources = attentionSources(messagesEnabled, reservationsEnabled);
   return {
     async recover() {
       // A process may die on either side of the network boundary. Only a claim
@@ -81,7 +89,8 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
         JOIN "DashboardUser" u ON u."id" = d."userId" AND u."organizationId" = d."organizationId"
         JOIN "HostMobilePushPreference" f ON f."userId" = u."id" AND f."organizationId" = u."organizationId"
         WHERE i."propertyId" IN (${Prisma.join([...propertyIds])})
-          AND i."visibility" = 'HOST' AND i."workflowState" = 'ACTION_REQUIRED' AND i."actionRequired" = true AND i."resolvedAt" IS NULL
+          AND i."visibility" = 'HOST' AND ((i."workflowState" = 'ACTION_REQUIRED' AND i."actionRequired" = true) OR
+            (i."engine" = 'HOST_RESERVATION' AND i."workflowState" = 'INFORMATIONAL')) AND i."resolvedAt" IS NULL
           AND i."lastSignalAt" >= ${notBefore.toISOString().slice(0, -1)}::timestamp AND i."lastSignalAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
           AND i."lastSignalAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '24 hours'
           AND d."revokedAt" IS NULL AND d."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND d."projectId" = ${HOST_PUSH_PROJECT}
@@ -135,7 +144,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
             user.organizationId !== delivery.organizationId || !user.isActive || !['ORG_ADMIN','ADMIN','PLATFORM_ADMIN'].includes(user.role) ||
             preference.organizationId !== delivery.organizationId || source.organizationId !== delivery.organizationId ||
             source.propertyId !== delivery.propertyId || source.reopenedCount !== delivery.sourceEpoch || source.resolvedAt ||
-            source.visibility !== 'HOST' || source.workflowState !== 'ACTION_REQUIRED' || !source.actionRequired || issueKind(source) !== delivery.kind)
+            source.visibility !== 'HOST' || (source.engine === 'HOST_RESERVATION' ? source.workflowState !== 'INFORMATIONAL' : source.workflowState !== 'ACTION_REQUIRED' || !source.actionRequired) || issueKind(source) !== delivery.kind)
           return null;
         if (source.threadId && source.messageId && await tx.hostMobileMessageRead.findUnique({where: {
           organizationId_userId_propertyId_threadId_messageId: {organizationId: delivery.organizationId, userId: delivery.userId,
@@ -148,7 +157,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
         // notification binding here; interactive HTTP authorization is unchanged.
         return {
           event: {id: delivery.eventId, organizationId: delivery.organizationId, propertyId: property.id,
-            kind: delivery.kind as HostAttentionKind, actionRequired: true, state: 'ACTION_REQUIRED', severity: source.severity, occurredAt: delivery.occurredAt},
+            kind: delivery.kind as HostAttentionKind, actionRequired: source.actionRequired, state: source.engine === 'HOST_RESERVATION' ? 'INFORMATIONAL' : 'ACTION_REQUIRED', severity: source.severity, occurredAt: delivery.occurredAt},
           recipient: {userId: user.id, organizationId: user.organizationId, role: user.role, activeSession: true, allowedPropertyIds: [property.id]},
           preference: {enabled: preference.enabled, kinds: preference.kinds as HostAttentionKind[], timezone: preference.timezone,
             quietHours: preference.quietStartHour === null ? null : {startHour: preference.quietStartHour, endHour: preference.quietEndHour!, allowCritical: preference.allowCritical}},
@@ -190,8 +199,9 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
               AND s."revokedAt" IS NULL AND s."tokenVersion" = u."tokenVersion"
               AND s."authenticatedAt" <= s."lastActivityAt" AND s."lastActivityAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
               AND p."status" = 'ACTIVE' AND f."enabled" = true AND f."revision" = ${snapshot.preferenceRevision}
-              AND o."kind" = ANY(f."kinds") AND i."visibility" = 'HOST' AND i."workflowState" = 'ACTION_REQUIRED'
-              AND i."actionRequired" = true AND i."resolvedAt" IS NULL AND i."reopenedCount" = o."sourceEpoch"
+              AND o."kind" = ANY(f."kinds") AND i."visibility" = 'HOST'
+              AND ((i."workflowState"='ACTION_REQUIRED' AND i."actionRequired"=true)
+                OR (i."engine"='HOST_RESERVATION' AND i."workflowState"='INFORMATIONAL')) AND i."resolvedAt" IS NULL AND i."reopenedCount" = o."sourceEpoch"
               AND i."severity"::text = ${snapshot.event.severity}
               AND ${kindSql} = o."kind" ${messageFence}
               AND (f."quietStartHour" IS NULL OR (f."allowCritical" = true AND i."severity" = 'CRITICAL') OR NOT (
@@ -235,7 +245,7 @@ export async function maintainHostPushRecords(db: PrismaClient, organizationIds:
     const deliveriesDeleted = await tx.$executeRaw(Prisma.sql`WITH obsolete AS (
       SELECT o."id" FROM "HostMobilePushDelivery" o
       WHERE o."organizationId" IN (${Prisma.join([...organizationIds])})
-        AND o."kind" <> 'GUEST_MESSAGE'
+        AND o."kind" NOT IN ('GUEST_MESSAGE','NEW_RESERVATION')
         AND o."state" IN ('PROVIDER_ACCEPTED','FAILED','SKIPPED')
         AND o."updatedAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'
         AND o."expiresAt" < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '30 days'

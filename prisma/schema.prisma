@@ -3785,3 +3785,14 @@ model HostMobileNotificationRead {
   @@id([organizationId, userId, propertyId, eventId], map: "HostMobileNotificationRead_scope_key")
   @@index([readAt])
 }
+
+// First-seen reservation metadata, captured atomically by the migration trigger.
+// No guest content. Never backfilled: historical updates must not generate alerts.
+model HostMobileReservationEvent {
+  reservationId String @id
+  organizationId String
+  propertyId String
+  occurredAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([occurredAt])
+}
