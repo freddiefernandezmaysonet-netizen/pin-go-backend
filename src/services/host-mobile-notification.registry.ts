@@ -12,9 +12,9 @@ function object(value:unknown,allowed:string[]){
   return value as Record<string,unknown>;
 }
 export function parsePushRegistration(value:unknown){
-  const v=object(value,['token','platform','projectId']);
-  if(typeof v.token!=='string'||! /^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{16,200}\]$/.test(v.token)||!['ios','android'].includes(String(v.platform))||v.projectId!==PROJECT)return fail(400,'PUSH_REQUEST_INVALID');
-  return {token:v.token,platform:v.platform as string,projectId:PROJECT};
+  const v=object(value,['token','platform','projectId','lifetime']);
+  if(typeof v.token!=='string'||! /^(?:ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]{16,200}\]$/.test(v.token)||!['ios','android'].includes(String(v.platform))||v.projectId!==PROJECT||(v.lifetime!==undefined&&v.lifetime!=='UNTIL_REVOKED'))return fail(400,'PUSH_REQUEST_INVALID');
+  return {token:v.token,platform:v.platform as string,projectId:PROJECT,persistent:v.lifetime==='UNTIL_REVOKED'};
 }
 export function parsePushPreference(value:unknown){
   const v=object(value,['enabled','kinds','timezone','quietHours','expectedRevision']);
@@ -43,14 +43,14 @@ export function createHostPushRegistry(db:PrismaClient,env:Env){
       // Exact token possession and current actor/session only. Never expose another
       // binding, token, hash, ciphertext or device identifier, and never renew it.
       const row=await prisma.hostMobilePushDevice.findFirst({where:{tokenHash,userId:actor.id,organizationId:actor.orgId,
-        sessionId:actor.sessionId,platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:{gt:now}},select:{expiresAt:true}});
-      return {device:{registered:!!row,expiresAt:row?row.expiresAt.toISOString():null}};
+        sessionId:actor.sessionId,platform:input.platform,projectId:PROJECT,revokedAt:null,OR:[{expiresAt:null},{expiresAt:{gt:now}}]},select:{expiresAt:true}});
+      return {device:{registered:!!row,expiresAt:row?.expiresAt?.toISOString()??null,...(row&&row.expiresAt===null?{persistent:true}: {})}};
     },
     async register(actor:PushActor,body:unknown,now=new Date()){
       const input=parsePushRegistration(body),tokenHash=createHash('sha256').update(input.token).digest('hex');
       const tokenCiphertext=sealToken(env,JSON.stringify([actor.orgId,actor.id,actor.sessionId,tokenHash]),input.token);
       // Possession of the push token permits rebinding that token on account switch; old actor/session ownership is replaced atomically.
-      await prisma.hostMobilePushDevice.upsert({where:{tokenHash},create:{id:randomUUID(),userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenHash,tokenCiphertext,bindingVersion:1,platform:input.platform,projectId:PROJECT,expiresAt:new Date(now.getTime()+30*86400000)},update:{userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenCiphertext,bindingVersion:{increment:1},platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:new Date(now.getTime()+30*86400000)}});
+      await prisma.hostMobilePushDevice.upsert({where:{tokenHash},create:{id:randomUUID(),userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenHash,tokenCiphertext,bindingVersion:1,platform:input.platform,projectId:PROJECT,expiresAt:input.persistent?null:new Date(now.getTime()+30*86400000)},update:{userId:actor.id,organizationId:actor.orgId,sessionId:actor.sessionId,tokenCiphertext,bindingVersion:{increment:1},platform:input.platform,projectId:PROJECT,revokedAt:null,expiresAt:input.persistent?null:new Date(now.getTime()+30*86400000)}});
       return {registered:true};
     },
     async revokeSession(actor:PushActor,now=new Date()){

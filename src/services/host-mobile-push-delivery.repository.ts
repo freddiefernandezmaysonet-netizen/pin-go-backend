@@ -93,7 +93,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
             (i."engine" = 'HOST_RESERVATION' AND i."workflowState" = 'INFORMATIONAL')) AND i."resolvedAt" IS NULL
           AND i."lastSignalAt" >= ${notBefore.toISOString().slice(0, -1)}::timestamp AND i."lastSignalAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
           AND i."lastSignalAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '24 hours'
-          AND d."revokedAt" IS NULL AND d."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND d."projectId" = ${HOST_PUSH_PROJECT}
+          AND d."revokedAt" IS NULL AND (d."expiresAt" IS NULL OR d."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')) AND d."projectId" = ${HOST_PUSH_PROJECT}
           AND u."isActive" = true AND u."role" IN ('ORG_ADMIN','ADMIN','PLATFORM_ADMIN')
           AND f."enabled" = true AND ${kindSql} = ANY(f."kinds")
           ${messagesEnabled ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM "HostMobileMessageRead" r
@@ -138,7 +138,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
           tx.hostMobilePushPreference.findUnique({where: {userId: delivery.userId}}),
           tx.property.findFirst({where: {id: delivery.propertyId, organizationId: delivery.organizationId, status: 'ACTIVE'}, select: {id: true}}),
         ]);
-        if (!device || !user || !source || !preference || !property || device.revokedAt || device.expiresAt <= now ||
+        if (!device || !user || !source || !preference || !property || device.revokedAt || (device.expiresAt !== null && device.expiresAt <= now) ||
             device.updatedAt.getTime() !== delivery.deviceUpdatedAt.getTime() || device.bindingVersion !== delivery.deviceBindingVersion || device.userId !== delivery.userId ||
             device.organizationId !== delivery.organizationId || device.sessionId !== delivery.sessionId ||
             user.organizationId !== delivery.organizationId || !user.isActive || !['ORG_ADMIN','ADMIN','PLATFORM_ADMIN'].includes(user.role) ||
@@ -194,7 +194,7 @@ export function createHostPushDeliveryRepository(db: PrismaClient, messagesEnabl
             JOIN ${sources} i ON i."id" = o."sourceId" AND i."organizationId" = p."organizationId" AND i."propertyId" = p."id"
             WHERE v."id" = o."deviceId" AND v."updatedAt" = o."deviceUpdatedAt" AND v."bindingVersion" = o."deviceBindingVersion" AND v."userId" = o."userId"
               AND v."sessionId" = o."sessionId" AND v."organizationId" = o."organizationId" AND v."revokedAt" IS NULL
-              AND v."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AND v."projectId" = ${HOST_PUSH_PROJECT}
+              AND (v."expiresAt" IS NULL OR v."expiresAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')) AND v."projectId" = ${HOST_PUSH_PROJECT}
               AND v."platform" IN ('ios','android') AND u."isActive" = true AND u."role" IN ('ORG_ADMIN','ADMIN','PLATFORM_ADMIN')
               AND (s."revokedAt" IS NULL OR s."revokeReason" IN ('IDLE_TIMEOUT','ABSOLUTE_TIMEOUT')) AND s."tokenVersion" = u."tokenVersion"
               AND s."authenticatedAt" <= s."lastActivityAt" AND s."lastActivityAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')

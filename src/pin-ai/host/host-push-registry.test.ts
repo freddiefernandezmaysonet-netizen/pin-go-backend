@@ -6,7 +6,7 @@ const registration={token:'ExpoPushToken[synthetic_token_123456789]',platform:'i
 const env={HOST_MOBILE_PUSH_TOKEN_KEY_ID:'test',HOST_MOBILE_PUSH_TOKEN_KEYS:JSON.stringify({test:'ab'.repeat(32)})};
 function fixture(){
   const devices=new Map<string,any>();let preference:any=null;
-  const db:any={hostMobilePushDevice:{findFirst:async({where,select}:any)=>{assert.deepEqual(select,{expiresAt:true});return [...devices.values()].find(row=>Object.entries(where).every(([k,v]:any)=>k==='expiresAt'?row[k]>v.gt:(row[k]??null)===v))??null;},upsert:async({where,create,update}:any)=>{devices.set(where.tokenHash,devices.has(where.tokenHash)?{...devices.get(where.tokenHash),...update}:create);},updateMany:async({where,data}:any)=>{let count=0;for(const [key,row]of devices)if(Object.entries(where).every(([k,v])=>(row[k]??null)===v)){devices.set(key,{...row,...data});count++;}return{count};}},
+  const db:any={hostMobilePushDevice:{findFirst:async({where,select}:any)=>{assert.deepEqual(select,{expiresAt:true});return [...devices.values()].find(row=>Object.entries(where).every(([k,v]:any)=>k==='OR'?(row.expiresAt===null||row.expiresAt>v[1].expiresAt.gt):k==='expiresAt'?row[k]>v.gt:(row[k]??null)===v))??null;},upsert:async({where,create,update}:any)=>{devices.set(where.tokenHash,devices.has(where.tokenHash)?{...devices.get(where.tokenHash),...update}:create);},updateMany:async({where,data}:any)=>{let count=0;for(const [key,row]of devices)if(Object.entries(where).every(([k,v])=>(row[k]??null)===v)){devices.set(key,{...row,...data});count++;}return{count};}},
     hostMobilePushPreference:{findFirst:async({where}:any)=>preference&&preference.userId===where.userId&&preference.organizationId===where.organizationId?preference:null,findUnique:async()=>preference,create:async({data}:any)=>{preference=data;},updateMany:async({where,data}:any)=>{if(!preference||!Object.entries(where).every(([k,v])=>preference[k]===v))return{count:0};preference={...preference,...data};return{count:1};}}};
   db.$transaction=async(run:any)=>run(db);
   return{devices,registry:createHostPushRegistry(db,env),db};
@@ -51,3 +51,21 @@ test('preference parsing rejects invalid timezone, extra authority fields and qu
   for(const change of [{timezone:'Invalid/Timezone'},{expectedRevision:-1},{userId:'other'},{enabled:'yes'},{kinds:['UNLOCK']},{kinds:['GUEST_INCIDENT','GUEST_INCIDENT']},{quietHours:{startHour:8,endHour:8,allowCritical:false}}])assert.throws(()=>parsePushPreference({...preference,...change}),/INVALID/);
 });
 
+
+test('persistent registration survives inactivity without renewing or opting in; legacy expiry is preserved',async()=>{
+ const f=fixture(),now=new Date('2026-10-20T12:00:00Z');
+ await f.registry.register(actor,registration,now);
+ const row=[...f.devices.values()][0];assert.ok(row.expiresAt instanceof Date);
+ const later=new Date('2027-10-20T12:00:00Z');
+ assert.equal((await f.registry.deviceStatus(actor,registration,later)).device.registered,false);
+ await f.registry.register(actor,{...registration,lifetime:'UNTIL_REVOKED'},now);
+ assert.equal([...f.devices.values()][0].expiresAt,null);
+ const before=JSON.stringify([...f.devices.values()]);
+ assert.deepEqual(await f.registry.deviceStatus(actor,registration,later),{device:{registered:true,expiresAt:null,persistent:true}});
+ assert.equal(JSON.stringify([...f.devices.values()]),before);
+ assert.equal((await f.registry.preference(actor)).enabled,false);
+ assert.equal((await f.registry.deviceStatus({...actor,sessionId:'other'},registration,later)).device.registered,false);
+ await f.registry.revokeSession(actor,later);
+ assert.equal((await f.registry.deviceStatus(actor,registration,later)).device.registered,false);
+ for(const lifetime of [null,'FOREVER',true,30])assert.throws(()=>parsePushRegistration({...registration,lifetime}),/INVALID/);
+});
