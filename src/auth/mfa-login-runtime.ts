@@ -1,3 +1,4 @@
+import type { HostSessionPolicy } from "./host-session.policy.js";
 import { hashOpaqueToken } from "./mfa-core.js";
 import { createAuthSession } from "./trusted-device-session.persistence.js";
 
@@ -67,6 +68,7 @@ export async function observeE5ShadowLogin(
     organizationId: string;
     email: string;
     tokenVersion: number;
+    sessionPolicy?: HostSessionPolicy;
     trustedDeviceToken?: string | null;
     userAgent?: string | null;
     ipHash?: string | null;
@@ -110,6 +112,7 @@ export async function observeE5ShadowLogin(
     userId: input.userId,
     organizationId: input.organizationId,
     tokenVersion: input.tokenVersion,
+    sessionPolicy: input.sessionPolicy ?? "LEGACY",
     trustedDeviceId: trustedDevice?.id ?? null,
     userAgent: cleanOptional(input.userAgent),
     lastIpHash: cleanOptional(input.ipHash),

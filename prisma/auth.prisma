@@ -119,6 +119,7 @@ model AuthSession {
   authenticatedAt   DateTime @default(now())
   lastActivityAt    DateTime @default(now())
   absoluteExpiresAt DateTime
+  sessionPolicy     String   @default("LEGACY")
   trustedDeviceId   String?
   userAgent         String?
   lastIpHash        String?

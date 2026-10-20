@@ -17,6 +17,7 @@ export type AuthenticatedUser = {
   organizationSlug?: string | null;
   sessionId?: string;
   tokenVersion?: number;
+  credentialExpiresAt?: number | undefined;
 };
 
 function clearAuthCookie(req: Request, res: Response) {
@@ -72,6 +73,7 @@ export async function requireAuth(
     organizationId: payload.orgId,
     tokenVersion: payload.tokenVersion,
     sessionId: payload.sid,
+    requiredPolicy: payload.sp,
     userAgent: req.get("user-agent") ?? null,
   });
 
@@ -111,6 +113,7 @@ export async function requireAuth(
     organizationSlug: decision.user.organization?.slug ?? null,
     sessionId: decision.sessionId ?? undefined,
     tokenVersion: decision.user.tokenVersion,
+    credentialExpiresAt: payload.exp === undefined ? undefined : payload.exp * 1000,
   } satisfies AuthenticatedUser;
 
   if (!(req as any).user?.orgId) {

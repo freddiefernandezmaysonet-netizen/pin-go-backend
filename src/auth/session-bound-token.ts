@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { hostCredentialLifetimeSeconds, isRollingHostPolicy, type HostSessionPolicy } from "./host-session.policy.js";
 import {
   signAuthToken,
   verifyAuthToken,
@@ -7,18 +8,21 @@ import {
 
 export type SessionBoundAuthTokenPayload = AuthTokenPayload & {
   sid?: string;
+  sp?: HostSessionPolicy;
+  exp?: number;
 };
 
 export function signSessionBoundAuthToken(
   payload: AuthTokenPayload,
-  sessionId?: string | null
+  sessionId?: string | null,
+  policy: HostSessionPolicy = "LEGACY"
 ): string {
   const sid = String(sessionId ?? "").trim();
   const signedPayload: SessionBoundAuthTokenPayload = sid
-    ? { ...payload, sid }
+    ? { ...payload, sid, ...(isRollingHostPolicy(policy) ? { sp: policy } : {}) }
     : payload;
 
-  return signAuthToken(signedPayload as AuthTokenPayload);
+  return signAuthToken(signedPayload as AuthTokenPayload, sid ? hostCredentialLifetimeSeconds(policy) : undefined);
 }
 
 export function verifySessionBoundAuthToken(
@@ -32,5 +36,6 @@ export function verifySessionBoundAuthToken(
   }
 
   const sid = typeof decoded.sid === "string" ? decoded.sid.trim() : "";
-  return sid ? { ...verified, sid } : verified;
+  const sp = isRollingHostPolicy(decoded.sp) ? decoded.sp : undefined;
+  return sid ? { ...verified, sid, ...(sp ? { sp } : {}), ...(typeof decoded.exp === "number" ? { exp: decoded.exp } : {}) } : verified;
 }

@@ -63,6 +63,7 @@ export async function guardAuthenticatedSession(
     organizationId: string;
     tokenVersion: number;
     sessionId?: string | null;
+    requiredPolicy?: string | undefined;
     userAgent?: string | null;
     mode?: SessionEnforcementMode;
     now?: Date;
@@ -156,6 +157,10 @@ export async function guardAuthenticatedSession(
     };
   }
 
+  if (input.requiredPolicy && inspection.valid && inspection.sessionPolicy !== input.requiredPolicy) {
+    return { kind: "DENY", mode, status: 401, error: "SESSION_EXPIRED", clearCookie: true, reason: "SESSION_POLICY_MISMATCH" };
+  }
+
   if (inspection.valid) {
     return {
       kind: "ALLOW",
@@ -166,7 +171,7 @@ export async function guardAuthenticatedSession(
     };
   }
 
-  if (mode === "SHADOW") {
+  if (mode === "SHADOW" && !input.requiredPolicy) {
     return {
       kind: "ALLOW",
       mode,

@@ -1,0 +1,1 @@
+ALTER TABLE "AuthSession" ADD COLUMN "sessionPolicy" TEXT NOT NULL DEFAULT 'LEGACY';
