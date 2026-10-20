@@ -1,3 +1,4 @@
+import { hostIdleTimeoutMs } from "./host-session.policy.js";
 import { evaluateSessionSecurity } from "./session-security.policy.js";
 
 export const SESSION_HUMAN_ACTIVITY_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
@@ -22,6 +23,7 @@ export type SessionInspection = {
   authenticatedAt?: Date;
   lastActivityAt?: Date;
   absoluteExpiresAt?: Date;
+  sessionPolicy?: string;
 };
 
 type AuthSessionRow = {
@@ -32,6 +34,7 @@ type AuthSessionRow = {
   authenticatedAt: Date;
   lastActivityAt: Date;
   absoluteExpiresAt: Date;
+  sessionPolicy?: string;
   revokedAt: Date | null;
 };
 
@@ -93,6 +96,7 @@ export async function inspectBoundSession(
       authenticatedAt: true,
       lastActivityAt: true,
       absoluteExpiresAt: true,
+      sessionPolicy: true,
       revokedAt: true,
     },
   });
@@ -145,6 +149,7 @@ export async function inspectBoundSession(
     {
       authenticatedAt: row.authenticatedAt,
       lastActivityAt: row.lastActivityAt,
+      sessionPolicy: row.sessionPolicy,
     },
     now
   );
@@ -166,6 +171,7 @@ export async function inspectBoundSession(
     valid: true,
     sessionId,
     reason: "ACTIVE",
+    sessionPolicy: row.sessionPolicy ?? "LEGACY",
     authenticatedAt: row.authenticatedAt,
     lastActivityAt: row.lastActivityAt,
     absoluteExpiresAt: row.absoluteExpiresAt,
@@ -246,6 +252,7 @@ export async function touchBoundSessionHumanActivity(
     return { ...inspection, touched: false };
   }
 
+  const idle = hostIdleTimeoutMs(inspection.sessionPolicy);
   const result = await client.authSession.updateMany({
     where: {
       id: inspection.sessionId,
@@ -257,6 +264,7 @@ export async function touchBoundSessionHumanActivity(
     },
     data: {
       lastActivityAt: now,
+      ...(idle === null ? {} : { absoluteExpiresAt: new Date(now.getTime() + idle) }),
     },
   });
 

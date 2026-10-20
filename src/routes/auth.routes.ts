@@ -1,3 +1,4 @@
+import { selectHostSessionPolicy, hostCredentialLifetimeSeconds, hostCredentialNeedsRenewal, isRollingHostPolicy } from "../auth/host-session.policy.js";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import {
@@ -108,6 +109,7 @@ authRouter.post("/auth/login", async (req, res) => {
     const trustedDeviceToken = loginTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
     const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);
+    const sessionPolicy = selectHostSessionPolicy(user.role, isMobileAuthClient(req), req.get("x-pin-go-session-renewal") === "1");
     let boundSessionId: string | null = null;
 
     if (e6Runtime.mode === "ENFORCE" && !e6Runtime.ready) {
@@ -124,6 +126,7 @@ authRouter.post("/auth/login", async (req, res) => {
           organizationId: user.organizationId,
           email: user.email,
           tokenVersion: user.tokenVersion,
+          sessionPolicy,
           trustedDeviceToken,
           userAgent: req.get("user-agent") ?? null,
         });
@@ -150,6 +153,7 @@ authRouter.post("/auth/login", async (req, res) => {
             userId: user.id,
             organizationId: user.organizationId,
             tokenVersion: user.tokenVersion,
+          sessionPolicy,
             trustedDeviceId: trustedDevice.id,
             userAgent: req.get("user-agent") ?? null,
           });
@@ -208,6 +212,11 @@ authRouter.post("/auth/login", async (req, res) => {
       await observeShadow();
     }
 
+    if (!boundSessionId && isRollingHostPolicy(sessionPolicy)) {
+      const session = await createAuthSession(prisma as any, { userId: user.id, organizationId: user.organizationId, tokenVersion: user.tokenVersion, sessionPolicy, userAgent: req.get("user-agent") ?? null });
+      boundSessionId = session.sessionId;
+    }
+
     const token = signSessionBoundAuthToken(
       {
         sub: user.id,
@@ -216,7 +225,8 @@ authRouter.post("/auth/login", async (req, res) => {
         role: user.role,
         tokenVersion: user.tokenVersion,
       },
-      boundSessionId
+      boundSessionId,
+      sessionPolicy
     );
 
     await prisma.dashboardUser.update({
@@ -228,6 +238,7 @@ authRouter.post("/auth/login", async (req, res) => {
       "Set-Cookie",
       buildAuthCookie(token, {
         requestOrigin: req.get("origin"),
+        maxAgeSeconds: hostCredentialLifetimeSeconds(sessionPolicy),
       })
     );
 
@@ -332,8 +343,17 @@ authRouter.post("/auth/session/activity", requireAuth, async (req, res) => {
       });
     }
 
+    let renewedToken: string | undefined;
+    if (activity.valid && typeof user.email === "string" && isRollingHostPolicy(activity.sessionPolicy) && hostCredentialNeedsRenewal(activity.sessionPolicy, user.credentialExpiresAt)) {
+      renewedToken = signSessionBoundAuthToken({ sub: user.id, orgId: user.orgId, email: user.email, role: user.role, tokenVersion: user.tokenVersion }, user.sessionId, activity.sessionPolicy);
+      if (activity.sessionPolicy === "HOST_WEB_V1") {
+        res.setHeader("Set-Cookie", buildAuthCookie(renewedToken, { requestOrigin: req.get("origin"), maxAgeSeconds: hostCredentialLifetimeSeconds(activity.sessionPolicy) }));
+      }
+      res.setHeader("Cache-Control", "no-store");
+    }
     return res.json({
       ok: true,
+      ...(renewedToken && activity.sessionPolicy === "HOST_MOBILE_V1" && isMobileAuthClient(req) ? { mobileSessionToken: renewedToken } : {}),
       active: activity.valid,
       touched: activity.touched,
       bound: activity.bound,

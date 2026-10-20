@@ -21,7 +21,7 @@ test('mobile trust is issued after MFA, skips only subsequent MFA and retains we
     mfaChallenge:{findUnique:async({where}:any)=>[...challenges.values()].find(c=>hash(c.token)===where.challengeTokenHash)||null},
     trustedDevice:{create:async({data}:any)=>{const row={...data,id:`device-${devices.length}`,revokedAt:null};devices.push(row);return row;},
       findFirst:async({where}:any)=>{lookups++;return devices.find(d=>d.userId===where.userId&&d.tokenHash===where.tokenHash&&!d.revokedAt&&d.expiresAt>where.expiresAt.gt)||null;},update:async()=>({})},
-    authSession:{create:async({data}:any)=>{const row={...data,id:`session-${sessions.length}`};sessions.push(row);return row;}},
+    authSession:{findUnique:async({where}:any)=>sessions.find(s=>s.id===where.id)??null,updateMany:async({where,data}:any)=>{const row=sessions.find(s=>s.id===where.id&&!s.revokedAt);if(!row)return {count:0};Object.assign(row,data);return {count:1};},create:async({data}:any)=>{const row={...data,id:`session-${sessions.length}`};sessions.push(row);return row;}},
     securityEvent:{create:async({data}:any)=>{events.push(data);return data;}}
   };
   const cache=new Map<string,any>();
@@ -35,10 +35,10 @@ test('mobile trust is issued after MFA, skips only subsequent MFA and retains we
       if(name.startsWith('node:'))return nativeRequire(name);
       const target=resolve(dirname(file),name).replace(/\.js$/,'.ts');
       const stem=target.replace(/\.ts$/,'');
-      if(stem.endsWith('/lib/auth'))return {comparePassword:async(p:string)=>p==='synthetic-password',buildAuthCookie:()=> 'auth=synthetic',buildClearAuthCookie:()=>'',extractTokenFromRequest:()=>null,hashPassword:async()=>''};
+      if(stem.endsWith('/lib/auth'))return {comparePassword:async(p:string)=>p==='synthetic-password',buildAuthCookie:(_token:string,options:any)=> `auth=synthetic; Max-Age=${options?.maxAgeSeconds??604800}`,buildClearAuthCookie:()=>'',extractTokenFromRequest:()=>null,hashPassword:async()=>''};
       if(stem.endsWith('/lib/passwordPolicy'))return {validatePasswordPolicy:()=>({ok:true})};
       if(stem.endsWith('/controllers/password.controller'))return {forgotPasswordHandler:noop,verifyForgotPasswordCodeHandler:noop,resetPasswordHandler:noop};
-      if(stem.endsWith('/middleware/requireAuth'))return {requireAuth:noop};
+      if(stem.endsWith('/middleware/requireAuth'))return {requireAuth:(req:any,_res:any,next:any)=>{const row=sessions.at(-1),user=users.find(u=>u.id===row.userId)!;req.user={id:user.id,orgId:user.organizationId,email:user.email,role:user.role,tokenVersion:user.tokenVersion,sessionId:row.id};next();}};
       if(stem.endsWith('/auth/mfa-global-runtime'))return {evaluateE7EffectiveMode:()=>({mode:'ENFORCE',ready:true,failClosed:true}),requiresE7MfaChallenge:()=>true};
       if(stem.endsWith('/auth/mfa-login-runtime'))return {observeE5ShadowLogin:()=>{throw Error('Unexpected shadow');}};
       if(stem.endsWith('/auth/mfa-canary-flow'))return {beginE6EmailCanary:async(i:any,input:any)=>{const token=`challenge-${challenges.size}`;challenges.set(token,{token,userId:input.userId,used:false});return {challengeToken:token,maskedDestination:'h***@example.invalid',expiresAt:new Date(Date.now()+300000)};},resendE6EmailCanary:async()=>({ok:false,reason:'NOT_FOUND'})};
@@ -46,7 +46,6 @@ test('mobile trust is issued after MFA, skips only subsequent MFA and retains we
       if(stem.endsWith('/auth/mfa-email-otp-delivery'))return {resolveMfaEmailDeliveryMode:()=> 'RESEND'};
       if(stem.endsWith('/auth/session-bound-token'))return {signSessionBoundAuthToken:(_p:any,id:string)=>`synthetic-session-${id}`,verifySessionBoundAuthToken:()=>({})};
       if(stem.endsWith('/auth/session-binding-shadow'))return {revokeBoundSessionOnLogout:async()=>({})};
-      if(stem.endsWith('/auth/session-enforcement-runtime'))return {touchBoundSessionHumanActivity:async()=>({})};
       return load(stem+'.ts');
     };
     const code=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -66,6 +65,21 @@ test('mobile trust is issued after MFA, skips only subsequent MFA and retains we
   assert.ok(Math.abs(Date.parse(accepted.body.mobileTrustedDeviceExpiresAt)-Date.now()-30*86400000)<5000);
   assert.equal(devices[0].tokenHash,hash(token));assert.equal(devices[0].label,'Trusted mobile device');assert.ok(!JSON.stringify(events).includes(token));
   const next=await login(users[0]!.email,token);assert.equal(next.body.mfaRequired,undefined);assert.ok(next.body.mobileSessionToken);assert.equal(sessions.at(-1).trustedDeviceId,devices[0].id);
+  assert.equal(sessions.at(-1).sessionPolicy,'LEGACY');
+  const capable={'x-pin-go-client':'mobile','x-pin-go-session-renewal':'1'};
+  const mobileRenewable=await login(users[0]!.email,token,capable);
+  assert.equal(mobileRenewable.status,200);assert.equal(sessions.at(-1).sessionPolicy,'HOST_MOBILE_V1');
+  assert.equal(+sessions.at(-1).absoluteExpiresAt-+sessions.at(-1).authenticatedAt,30*86400000);
+  const mfaRenewable=await login(users[1]!.email,undefined,capable);
+  const verifiedRenewable=await post('/auth/mfa/verify',{challengeToken:mfaRenewable.body.challengeToken,code:'000000',trustDevice:false},capable);
+  assert.equal(verifiedRenewable.status,200);assert.equal(sessions.at(-1).sessionPolicy,'HOST_MOBILE_V1');
+  const renewableRow=sessions.at(-1);renewableRow.authenticatedAt=new Date(Date.now()-86400000);renewableRow.lastActivityAt=new Date(Date.now()-360000);
+  const activity=await post('/auth/session/activity',{},capable);
+  assert.equal(activity.body.active,true);assert.equal(activity.body.touched,true);assert.ok(activity.body.mobileSessionToken);
+  assert.equal(activity.headers.get('set-cookie'),null);
+  assert.ok(Math.abs(+renewableRow.absoluteExpiresAt-Date.now()-30*86400000)<5000);
+  renewableRow.revokedAt=new Date();const revokedActivity=await post('/auth/session/activity',{},capable);
+  assert.equal(revokedActivity.body.active,false);assert.equal(revokedActivity.body.mobileSessionToken,undefined);
   const n=lookups;assert.equal((await login(users[0]!.email,token,undefined,'wrong')).status,401);assert.equal(lookups,n);
   assert.equal((await login(users[1]!.email,token)).body.mfaRequired,true);
   devices[0].revokedAt=new Date();assert.equal((await login(users[0]!.email,token)).body.mfaRequired,true);devices[0].revokedAt=null;
@@ -75,5 +89,10 @@ test('mobile trust is issued after MFA, skips only subsequent MFA and retains we
   assert.ok((await login(users[0]!.email,undefined,{cookie:`pingo_trusted_device=${token}`})).body.user);
   const web=await login(users[0]!.email,undefined,{});const webVerified=await post('/auth/mfa/verify',{challengeToken:web.body.challengeToken,code:'000000',trustDevice:true},{});
   assert.equal(webVerified.body.mobileTrustedDeviceToken,undefined);assert.equal(webVerified.body.mobileSessionToken,undefined);assert.ok(webVerified.headers.getSetCookie().some(v=>v.startsWith('pingo_trusted_device=')));
+  assert.equal(sessions.at(-1).sessionPolicy,'HOST_WEB_V1');
+  const webActivity=await post('/auth/session/activity',{}, {'x-pin-go-client':'mobile'});
+  assert.equal(webActivity.body.active,true);assert.equal(webActivity.body.mobileSessionToken,undefined);assert.match(webActivity.headers.get('set-cookie')!,/Max-Age=172800/);
+  assert.equal(webActivity.headers.get('cache-control'),'no-store');
+  assert.equal(+sessions.at(-1).absoluteExpiresAt-+sessions.at(-1).authenticatedAt,86400000);
   const optout=await login(users[1]!.email);const out=await post('/auth/mfa/verify',{challengeToken:optout.body.challengeToken,code:'000000',trustDevice:false});assert.equal(out.body.mobileTrustedDeviceToken,undefined);assert.equal(devices.length,2);
 });

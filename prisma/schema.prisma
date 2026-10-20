@@ -3703,7 +3703,7 @@ model HostMobilePushDevice {
   platform String
   projectId String
   revokedAt DateTime?
-  expiresAt DateTime
+  expiresAt DateTime?
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
   user DashboardUser @relation(fields: [userId], references: [id], onDelete: Cascade)

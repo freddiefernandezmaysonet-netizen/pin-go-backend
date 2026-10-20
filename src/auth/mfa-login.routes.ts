@@ -1,3 +1,4 @@
+import { selectHostSessionPolicy, hostCredentialLifetimeSeconds, isRollingHostPolicy } from "./host-session.policy.js";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { hashOpaqueToken } from "./mfa-core.js";
@@ -233,11 +234,13 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
       });
     }
 
+    const sessionPolicy = selectHostSessionPolicy(user.role, isMobileAuthClient(req), req.get("x-pin-go-session-renewal") === "1");
     const session = await createAuthSession(prisma as any, {
       userId: user.id,
       organizationId: user.organizationId,
       tokenVersion: user.tokenVersion,
       trustedDeviceId,
+      sessionPolicy,
       userAgent: req.get("user-agent") ?? null,
     });
 
@@ -264,7 +267,8 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
         role: user.role,
         tokenVersion: user.tokenVersion,
       },
-      session.sessionId
+      session.sessionId,
+      sessionPolicy
     );
 
     await prisma.dashboardUser.update({
@@ -273,7 +277,7 @@ mfaLoginRouter.post("/auth/mfa/verify", async (req, res) => {
     });
 
     const cookies = [
-      buildAuthCookie(token, { requestOrigin: req.get("origin") ?? null }),
+      buildAuthCookie(token, { requestOrigin: req.get("origin") ?? null, maxAgeSeconds: hostCredentialLifetimeSeconds(sessionPolicy) }),
       ...(trustedDeviceCookie ? [trustedDeviceCookie] : []),
     ];
     res.setHeader("Set-Cookie", cookies);

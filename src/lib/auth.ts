@@ -13,6 +13,7 @@ export type AuthTokenPayload = {
 
 export type AuthCookieOptions = {
   requestOrigin?: string | null;
+  maxAgeSeconds?: number | undefined;
 };
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -248,9 +249,9 @@ export function getBrandAuthCookieName() {
     : "pingo_brand_token";
 }
 
-export function signAuthToken(payload: AuthTokenPayload) {
+export function signAuthToken(payload: AuthTokenPayload, lifetimeSeconds?: number) {
   return jwt.sign(payload, getJwtSecret(), {
-    expiresIn: JWT_EXPIRES_IN,
+    expiresIn: lifetimeSeconds ?? JWT_EXPIRES_IN,
   });
 }
 
@@ -382,7 +383,7 @@ export function buildAuthCookie(
     "Path=/",
     "HttpOnly",
     `SameSite=${sameSite}`,
-    `Max-Age=${7 * 24 * 60 * 60}`,
+    `Max-Age=${options.maxAgeSeconds ?? 7 * 24 * 60 * 60}`,
   ];
 
   if (isProd) {

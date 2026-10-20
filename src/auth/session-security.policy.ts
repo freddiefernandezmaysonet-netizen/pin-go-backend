@@ -1,3 +1,5 @@
+import { hostIdleTimeoutMs } from "./host-session.policy.js";
+
 export const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 export const SESSION_ABSOLUTE_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 export const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -5,6 +7,7 @@ export const TRUSTED_DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export type SessionSecurityState = {
   authenticatedAt: Date;
   lastActivityAt: Date;
+  sessionPolicy?: string | undefined;
 };
 
 export type SessionSecurityDecision =
@@ -29,11 +32,15 @@ export function evaluateSessionSecurity(
     return { valid: false, reason: "INVALID_TIMELINE" };
   }
 
-  if (current - authenticatedAt >= SESSION_ABSOLUTE_TIMEOUT_MS) {
+  const rollingIdle = hostIdleTimeoutMs(state.sessionPolicy);
+  if (state.sessionPolicy && state.sessionPolicy !== "LEGACY" && rollingIdle === null) {
+    return { valid: false, reason: "INVALID_TIMELINE" };
+  }
+  if (rollingIdle === null && current - authenticatedAt >= SESSION_ABSOLUTE_TIMEOUT_MS) {
     return { valid: false, reason: "ABSOLUTE_TIMEOUT" };
   }
 
-  if (current - lastActivityAt >= SESSION_IDLE_TIMEOUT_MS) {
+  if (current - lastActivityAt >= (rollingIdle ?? SESSION_IDLE_TIMEOUT_MS)) {
     return { valid: false, reason: "IDLE_TIMEOUT" };
   }
 

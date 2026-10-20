@@ -1,3 +1,4 @@
+import { hostIdleTimeoutMs, type HostSessionPolicy } from "./host-session.policy.js";
 import { generateOpaqueToken, hashOpaqueToken } from "./mfa-core.js";
 import {
   SESSION_ABSOLUTE_TIMEOUT_MS,
@@ -20,6 +21,7 @@ export type AuthSessionCreateData = {
   authenticatedAt: Date;
   lastActivityAt: Date;
   absoluteExpiresAt: Date;
+  sessionPolicy?: HostSessionPolicy;
   trustedDeviceId?: string | null;
   userAgent?: string | null;
   lastIpHash?: string | null;
@@ -84,6 +86,7 @@ export async function createAuthSession(
     userId: string;
     organizationId: string;
     tokenVersion: number;
+    sessionPolicy?: HostSessionPolicy;
     trustedDeviceId?: string | null;
     userAgent?: string | null;
     lastIpHash?: string | null;
@@ -99,7 +102,9 @@ export async function createAuthSession(
   }
 
   const authenticatedAt = input.now ?? new Date();
-  const absoluteExpiresAt = authSessionAbsoluteExpiresAt(authenticatedAt);
+  const policy = input.sessionPolicy ?? "LEGACY";
+  const idle = hostIdleTimeoutMs(policy);
+  const absoluteExpiresAt = idle === null ? authSessionAbsoluteExpiresAt(authenticatedAt) : new Date(authenticatedAt.getTime() + idle);
 
   const row = await client.authSession.create({
     data: {
@@ -109,6 +114,7 @@ export async function createAuthSession(
       authenticatedAt,
       lastActivityAt: authenticatedAt,
       absoluteExpiresAt,
+      sessionPolicy: policy,
       trustedDeviceId: cleanOptional(input.trustedDeviceId),
       userAgent: cleanOptional(input.userAgent),
       lastIpHash: cleanOptional(input.lastIpHash),

@@ -23,3 +23,16 @@ test('notification binding rejects revocations, identity changes and malformed t
   ];
   for (const change of changes) assert.equal(permitsHostPushBinding({...binding, ...change}, expected, now), false);
 });
+
+
+test('HTTP timeout revocation keeps push consent but does not restore HTTP access', () => {
+  for (const revokeReason of ['IDLE_TIMEOUT','ABSOLUTE_TIMEOUT']) {
+    const timedOut={...binding,revokedAt:now,revokeReason};
+    assert.equal(permitsHostPushBinding(timedOut,expected,now),true);
+    assert.equal(evaluateSessionSecurity(timedOut,now).valid,false);
+    assert.equal(permitsHostPushBinding({...timedOut,revokeReason:'LOGOUT'},expected,now),false);
+    assert.equal(permitsHostPushBinding({...timedOut,tokenVersion:3},expected,now),false);
+  }
+  for (const revokeReason of ['LOGOUT','ADMIN_REVOKED','PASSWORD_RESET','INVALID_TIMELINE','unknown',null])
+    assert.equal(permitsHostPushBinding({...binding,revokedAt:now,revokeReason},expected,now),false);
+});
