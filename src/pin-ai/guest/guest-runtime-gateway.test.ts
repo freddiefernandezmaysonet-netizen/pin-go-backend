@@ -1346,3 +1346,25 @@ test("persists a replacement provider session and resumes it on the next message
   await gateway.reply({ guestToken: token, message: "¿Qué opciones tengo?" });
   assert.deepEqual(resumed, [undefined, "sess_old", "sess_replacement"]);
 });
+
+
+test("per-message language overrides reservation and changes on a reused conversation", async () => {
+  const reservation = { id: "reservation-a", propertyId: "property-a", preferredLanguage: "es-PR",
+    property: { organizationId: "org-a", timezone: "America/Puerto_Rico" } };
+  const { prisma } = createPrisma(reservation);
+  const languages: unknown[] = [];
+  const sessions: unknown[] = [];
+  const gateway = new GuestPinAIGateway(prisma, async (request, _location, session) => {
+    languages.push(request.context.preferredLanguage);
+    sessions.push(session);
+    return shadowResult(request);
+  }, true, () => now);
+  await gateway.reply({ guestToken: token, message: "Wi-Fi?", language: "en" });
+  await gateway.reply({ guestToken: token, message: "Wi-Fi?", language: "es" });
+  await gateway.reply({ guestToken: token, message: "Wi-Fi?" });
+  assert.deepEqual(languages, ["en", "es", "es"]);
+  assert.equal(sessions[1], "session_test");
+  assert.equal(reservation.preferredLanguage, "es-PR");
+  await assert.rejects(gateway.reply({ guestToken: token, message: "Hi", language: "fr" as "en" }), /INVALID_LANGUAGE/);
+  assert.equal(languages.length, 3);
+});
