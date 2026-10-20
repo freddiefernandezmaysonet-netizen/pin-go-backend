@@ -188,7 +188,9 @@ guestMobileIdentityRouter.post(
     if (!match?.[1]) return res.status(401).json({ ok: false, error: "UNAUTHENTICATED" });
     const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
       ? req.body as Record<string, unknown> : {};
-    if (Object.keys(body).length !== 1 || !Object.prototype.hasOwnProperty.call(body, "message")) {
+    if (!Object.prototype.hasOwnProperty.call(body, "message") ||
+        Object.keys(body).some(key => key !== "message" && key !== "language") ||
+        (Object.prototype.hasOwnProperty.call(body, "language") && body.language !== "en" && body.language !== "es")) {
       return res.status(400).json({ ok: false, error: "INVALID_REQUEST" });
     }
 
@@ -203,7 +205,8 @@ guestMobileIdentityRouter.post(
         createGuestPinAIRuntimeRunner(process.env),
         process.env.PIN_AI_GUEST_GATEWAY_ENABLED === "true",
       );
-      const result = await gateway.reply({ guestToken: scope.guestToken, message: body.message });
+      const result = await gateway.reply({ guestToken: scope.guestToken, message: body.message,
+        ...(body.language === "en" || body.language === "es" ? { language: body.language } : {}) });
       return res.json({ ok: true, ...result });
     } catch (error) {
       const code = error instanceof Error ? error.message : "PIN_AI_UNAVAILABLE";

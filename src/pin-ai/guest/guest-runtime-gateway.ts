@@ -156,6 +156,7 @@ export class GuestPinAIGatewayError extends Error {
       | "OUTSIDE_AVAILABILITY_WINDOW"
       | "INVALID_TOKEN"
       | "INVALID_MESSAGE"
+      | "INVALID_LANGUAGE"
       | "RESERVATION_NOT_FOUND"
       | "CONVERSATION_BUSY"
       | "CONVERSATION_STATE_CONFLICT"
@@ -179,6 +180,7 @@ export class GuestPinAIGateway {
   async reply(input: Readonly<{
     guestToken: unknown;
     message: unknown;
+    language?: "en" | "es";
   }>): Promise<GuestPinAIGatewayResponse> {
     if (!this.enabled) {
       throw new GuestPinAIGatewayError("GATEWAY_DISABLED");
@@ -186,6 +188,9 @@ export class GuestPinAIGateway {
 
     const guestToken = normalizeGuestToken(input.guestToken);
     const message = normalizeGuestMessage(input.message);
+    if (input.language !== undefined && input.language !== "en" && input.language !== "es") {
+      throw new GuestPinAIGatewayError("INVALID_LANGUAGE");
+    }
     const currentDateTime = this.now();
 
     const reservation = (await this.prisma.reservation.findFirst({
@@ -227,7 +232,7 @@ export class GuestPinAIGateway {
     }) === false) throw new GuestPinAIGatewayError("GATEWAY_DISABLED");
 
     const preferredLanguage: "en" | "es" =
-      reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en";
+      input.language ?? (reservation.preferredLanguage.toLowerCase().startsWith("es") ? "es" : "en");
     const currentLocalDateTime = formatPropertyLocalDateTime(
       currentDateTime,
       reservation.property.timezone,
