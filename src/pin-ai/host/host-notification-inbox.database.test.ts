@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import test from 'node:test';
 import {PrismaClient} from '@prisma/client';
-import {createHostNotificationInbox,parseInboxQuery,parseInboxRead} from '../../services/host-mobile-notification-inbox.js';
+import {createHostNotificationInbox,parseInboxQuery,parseInboxRead,withoutNativeCacheTimestamp} from '../../services/host-mobile-notification-inbox.js';
 const enabled=process.env.PIN_AI_HOST_INCIDENT_DB_TEST==='true';
 const url=new URL(process.env.DATABASE_URL??'http://missing');
 if(enabled&&(!['localhost','127.0.0.1'].includes(url.hostname)||url.pathname!=='/pin_ai_host_incident_test'))throw Error('Isolated local host database required');
@@ -10,6 +10,14 @@ test('inbox rejects malformed pagination and acknowledgement before database wor
   for(const q of [{filter:'other'},{cursor:['one']},{cursor:'abc'},{cursor:'?route=evil'},{extra:true}])assert.throws(()=>parseInboxQuery(q));
   for(const v of [null,{eventId:'event'},{eventId:'../event',propertyId:'property'},{eventId:'event',propertyId:'property',read:true}])assert.throws(()=>parseInboxRead(v));
   assert.deepEqual(parseInboxQuery({}),{unread:false,cursor:null});
+});
+test('native no-store requests preserve inbox filters and reservation destinations',()=>{
+  assert.deepEqual(parseInboxQuery({filter:'unread',_:'1792545272000'}),{unread:true,cursor:null});
+  const destination={eventId:'event',propertyId:'property'};
+  assert.deepEqual(parseInboxRead(withoutNativeCacheTimestamp({...destination,_:'1792545272000'})),destination);
+  for(const value of [['1792545272000'],'bad','',{},null])assert.throws(()=>parseInboxQuery({_:value}));
+  assert.throws(()=>parseInboxQuery({filter:'all',_:'1792545272000',extra:true}));
+  assert.throws(()=>parseInboxRead({...destination,_:'1792545272000'}),'POST acknowledgement stays strict');
 });
 test('PostgreSQL inbox deduplicates devices, persists exact reads, paginates and isolates actors',{skip:!enabled},async()=>{
   const db=new PrismaClient(),inbox=createHostNotificationInbox(db),prefix=randomUUID();
