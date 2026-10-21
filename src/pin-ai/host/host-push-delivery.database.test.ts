@@ -99,7 +99,7 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
       assert.equal(await enqueue(), 1, 'a new incident episode has a distinct durable identity');
       await clear();
     });
-    await t.test('unattended push survives idle and absolute HTTP deadlines but never revocation', async () => {
+    await t.test('unattended push survives automatic HTTP timeouts but never explicit revocation', async () => {
       for (const age of [31 * 60_000, 13 * 3600_000]) {
         const authenticatedAt = new Date(Date.now() - age - 60_000);
         const lastActivityAt = new Date(Date.now() - age);
@@ -121,8 +121,14 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
         const snapshot = (await repository.current(row))!;
         assert.ok(snapshot);
         await db.authSession.update({where: {id: session.id}, data: {revokedAt: new Date(), revokeReason}});
-        assert.equal(await repository.current(row), null);
-        assert.equal(await repository.arm(row, snapshot), false, 'revocation after snapshot blocks network send');
+        const automaticTimeout = ['IDLE_TIMEOUT', 'ABSOLUTE_TIMEOUT'].includes(revokeReason);
+        if (automaticTimeout) {
+          assert.ok(await repository.current(row), 'automatic HTTP timeout preserves push consent');
+          assert.equal(await repository.arm(row, snapshot), true, 'automatic timeout does not block delivery');
+        } else {
+          assert.equal(await repository.current(row), null);
+          assert.equal(await repository.arm(row, snapshot), false, 'explicit revocation blocks network send');
+        }
         await clear();
       }
       await db.authSession.update({where: {id: session.id}, data: {
