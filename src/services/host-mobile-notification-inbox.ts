@@ -5,9 +5,17 @@ const kinds = ['NEW_RESERVATION','GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCE
 const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(v);
 const invalid = (): never => {throw new HostPushRegistryError(400,'NOTIFICATION_INBOX_INVALID');};
 type Cursor = {at: string; eventId: string; propertyId: string};
-export function parseInboxQuery(value: unknown) {
+// React Native's fetch adds a timestamp query parameter for cache: 'no-store'.
+// Ignore only that transport value; retain strict validation of business inputs.
+export function withoutNativeCacheTimestamp(value: unknown): Record<string,unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid();
   const q = value as Record<string,unknown>;
+  if (q._ !== undefined && (typeof q._ !== 'string' || !/^\d{1,16}$/.test(q._))) return invalid();
+  const {_: ignored, ...query} = q;
+  return query;
+}
+export function parseInboxQuery(value: unknown) {
+  const q = withoutNativeCacheTimestamp(value);
   if (Object.keys(q).some(k=>!['filter','cursor'].includes(k)) || q.filter !== undefined && !['all','unread'].includes(String(q.filter))) return invalid();
   let cursor: Cursor | null = null;
   if (q.cursor !== undefined) {
@@ -44,7 +52,7 @@ function history(actor:PushActor) {
 export function createHostNotificationInbox(db:PrismaClient) {
   return {
     async reservation(actor:PushActor,query:unknown) {
-      const {eventId,propertyId}=parseInboxRead(query);
+      const {eventId,propertyId}=parseInboxRead(withoutNativeCacheTimestamp(query));
       const rows=await db.$queryRaw<{reservationId:string}[]>(Prisma.sql`
         SELECT DISTINCT r."id" AS "reservationId" FROM "HostMobilePushDelivery" d
         JOIN "HostMobileReservationEvent" e ON d."sourceId"='reservation:' || e."reservationId"
