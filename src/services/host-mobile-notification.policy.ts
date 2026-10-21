@@ -13,6 +13,13 @@ export type HostPushRecipient = { userId: string; organizationId: string; role: 
 type Target = 'reservation' | 'incidents' | 'messages' | 'cleanings' | 'access';
 const targets: Record<HostAttentionKind, Target> = { NEW_RESERVATION: 'reservation', GUEST_INCIDENT: 'incidents', GUEST_MESSAGE: 'messages', CLEANING_EXCEPTION: 'cleanings', ACCESS_EXCEPTION: 'access' };
 const titles: Record<HostAttentionKind, string> = { NEW_RESERVATION: 'New reservation', GUEST_INCIDENT: 'Guest incident needs attention', GUEST_MESSAGE: 'Guest message needs attention', CLEANING_EXCEPTION: 'Cleaning needs attention', ACCESS_EXCEPTION: 'Access needs attention' };
+const bodies: Record<HostAttentionKind, string> = {
+  "NEW_RESERVATION": "You have a new reservation. Tap to review the stay details.",
+  "GUEST_INCIDENT": "A guest incident needs your attention. Tap to review it in Pin AI.",
+  "GUEST_MESSAGE": "A guest conversation needs your attention. Tap to open Messages.",
+  "CLEANING_EXCEPTION": "A cleaning needs your attention. Tap to review the cleaning update.",
+  "ACCESS_EXCEPTION": "A property access issue needs your attention. Tap to review it."
+};
 const validId = (value: string) => /^[A-Za-z0-9_-]{1,200}$/.test(value);
 export function prepareHostAttentionNotification(event: HostAttentionEvent, recipient: HostPushRecipient, preference: HostPushPreference, now: Date) {
   const skip = (reason: string) => ({ status: 'SKIP' as const, reason });
@@ -38,6 +45,6 @@ export function prepareHostAttentionNotification(event: HostAttentionEvent, reci
   // Dedupe must be enforced by durable storage at dispatch; this key alone does not send or deduplicate.
   const deduplicationKey = [event.organizationId,recipient.userId,event.id].map(v=>`${v.length}_${v}`).join('.');
   return { status:'PREPARED' as const, deduplicationKey,
-    payload: { title:titles[event.kind], body:'Open Pin&Go Host to review the latest status.',
+    payload: { title:titles[event.kind], body:bodies[event.kind],
       data:{ version:1, eventId:event.id, organizationId:event.organizationId, propertyId:event.propertyId, target:targets[event.kind] } } };
 }
