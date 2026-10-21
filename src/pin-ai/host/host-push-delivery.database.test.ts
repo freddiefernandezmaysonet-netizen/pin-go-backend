@@ -23,6 +23,8 @@ test('PostgreSQL durable push delivery, concurrency, current authorization and c
   const create = canonical.match(/CREATE TABLE "AuthSession" \([\s\S]*?\n\);/)?.[0];
   assert.ok(create);
   await db.$executeRawUnsafe(create.replace('CREATE TABLE', 'CREATE TABLE IF NOT EXISTS'));
+  const sessionPolicySql = readFileSync('prisma/migrations/20261020210000_host_session_policy/migration.sql', 'utf8');
+  await db.$executeRawUnsafe(sessionPolicySql.replace('ADD COLUMN ', 'ADD COLUMN IF NOT EXISTS '));
   const inboundSql = readFileSync('prisma/migrations/20261003181000_channex_pin_ai_inbound/migration.sql', 'utf8');
   for (const statement of inboundSql.split(';').filter(part => part.trim()))
     await db.$executeRawUnsafe(statement.replace('CREATE TABLE ', 'CREATE TABLE IF NOT EXISTS ')
