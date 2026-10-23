@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
-const APP_HOST = "app.pin-ngo.com";
+const PUBLIC_BOOKING_HOST = "pin-ngo.com";
+const STANDARD_BOOKING_HOSTS = new Set([PUBLIC_BOOKING_HOST, "app.pin-ngo.com", "www.pin-ngo.com"]);
 const MAX_URLS = 50_000;
 const BATCH_SIZE = 500;
 type Brand = { kind: string; customDomain: string | null };
@@ -40,8 +41,8 @@ export async function buildPublicStaysSitemap(
         brands.set(organization.id, brand);
       }
       // Custom-domain canonicals have their own existing sitemap.
-      if (brand.kind === "CUSTOM_BRAND" && brand.customDomain !== APP_HOST) continue;
-      urls.add(`https://${APP_HOST}/book/${encodeURIComponent(organization.slug)}/${encodeURIComponent(property.slug)}`);
+      if (brand.kind === "CUSTOM_BRAND" && !STANDARD_BOOKING_HOSTS.has(brand.customDomain ?? "")) continue;
+      urls.add(`https://${PUBLIC_BOOKING_HOST}/book/${encodeURIComponent(organization.slug)}/${encodeURIComponent(property.slug)}`);
       if (urls.size > MAX_URLS) throw new Error("SITEMAP_INDEX_REQUIRED");
     }
     if (properties.length < BATCH_SIZE) break;

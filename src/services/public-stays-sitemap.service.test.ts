@@ -13,7 +13,8 @@ test("only queries real active published properties of published organizations",
     assert.deepEqual(q.where, { status: "ACTIVE", isPublicBookable: true, isTestProperty: false, slug: { not: null }, organization: { publicBookingEnabled: true, slug: { not: null } } });
     return [row("serena", "palmasdelmar", "serena-studio"), row("new-real-property")];
   }), standard);
-  assert.match(xml, /serena-studio\/palmasdelmar/);
+  assert.match(xml, /<loc>https:\/\/pin-ngo\.com\/book\/serena-studio\/palmasdelmar<\/loc>/);
+  assert.doesNotMatch(xml, /app\.pin-ngo\.com/);
   assert.match(xml, /host\/new-real-property/);
 });
 
