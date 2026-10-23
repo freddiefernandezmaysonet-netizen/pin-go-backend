@@ -1987,10 +1987,17 @@ const guestAcceptedSecurePreCheckinRequirementText =
      pricing, 
     });
   } catch (error: any) {
-    console.error("[public-booking create-checkout error]", error?.message ?? error);
+    // Provider error messages can embed API keys or payment metadata.
+    // Record a fixed diagnostic code rather than the raw Stripe error.
+    const failureType =
+      typeof error?.type === "string" && error.type.startsWith("Stripe")
+        ? "STRIPE_PROVIDER_ERROR"
+        : "CHECKOUT_CREATE_FAILED";
+    console.error("[public-booking create-checkout error]", { failureType });
+
     return res.status(500).json({
       ok: false,
-      error: error?.message ?? "Failed to create checkout",
+      error: "Failed to create checkout",
     });
   }
 });
