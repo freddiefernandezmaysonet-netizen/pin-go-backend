@@ -31,15 +31,30 @@ function getOrgIdFromRequest(req: any) {
 }
 
 function sendRouteError(res: any, error: any) {
-  console.error("Dashboard payouts route error", error);
+  // Never log or return provider error objects. Stripe errors can contain
+  // secret API keys in their messages (e.g. an expired-key response).
+  const rawStatus = Number(error?.statusCode);
+  const rawCode = error?.code;
+  const isSafeClientError =
+    Number.isInteger(rawStatus) &&
+    rawStatus >= 400 &&
+    rawStatus < 500 &&
+    typeof rawCode === "string" &&
+    /^[A-Z][A-Z0-9_]{2,79}$/.test(rawCode);
 
-  return res.status(error?.statusCode || 500).json({
+  const statusCode = isSafeClientError ? rawStatus : 500;
+  const code = isSafeClientError ? rawCode : "PAYOUTS_ROUTE_ERROR";
+
+  // Structured, allowlisted diagnostics only: no raw message, stack, or details.
+  console.error("Dashboard payouts route error", { statusCode, code });
+
+  return res.status(statusCode).json({
     ok: false,
-    error: error?.code || "PAYOUTS_ROUTE_ERROR",
+    error: code,
     message:
-      error?.message ||
-      "Something went wrong while processing the host payout request.",
-    details: error?.details,
+      code === "MISSING_ORGANIZATION_CONTEXT"
+        ? "Missing organization context."
+        : "Unable to process the payout request. Please try again or contact support.",
   });
 }
 
