@@ -1,0 +1,22 @@
+name: Public booking IndexNow certification
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/public-booking-indexnow*'
+      - 'src/routes/dashboard.properties.route.ts'
+      - 'src/routes/dashboard.organization.route.ts'
+      - '.github/workflows/public-booking-indexnow.yml'
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: node --import tsx --test src/services/public-booking-indexnow.service.test.ts src/services/public-stays-sitemap.service.test.ts
+      - run: npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/services/public-booking-indexnow.service.ts

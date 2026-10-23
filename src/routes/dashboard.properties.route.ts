@@ -1,3 +1,4 @@
+import { capturePublicBookingUrls, notifyPublicBookingChange } from "../services/public-booking-indexnow.service.js";
 import { reconcilePropertyCleanerAccess } from "../services/cleaner-access-property-reconcile.service";
 import { parsePropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { Router } from "express";
@@ -1061,6 +1062,7 @@ if (checkOutTime !== undefined) {
           existing as unknown as Record<string, unknown>,
           data
         );
+      const previousPublicUrls = await capturePublicBookingUrls(prisma, orgId, existing.id);
       const propertyMutationAt = new Date();
 
       const updated = await prisma.$transaction(async (tx) => {
@@ -1185,6 +1187,7 @@ if (checkOutTime !== undefined) {
 
         return persistedProperty;
       });
+      void notifyPublicBookingChange(prisma, orgId, previousPublicUrls, updated.id);
 
 if (checkInTime !== undefined || checkOutTime !== undefined || cleaningDurationMinutes !== undefined ||
     cleaningStartOffsetMinutes !== undefined || timezone !== undefined) {
