@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"], "noEmit": true },
+  "include": [
+    "src/auth/app-review-access.ts",
+    "src/auth/app-review-access.test.ts",
+    "src/auth/app-review-login.test.ts",
+    "src/services/provision-app-review-account.ts",
+    "src/services/provision-app-review-account.test.ts",
+    "src/scripts/provision-app-review-account.ts"
+  ]
+}
