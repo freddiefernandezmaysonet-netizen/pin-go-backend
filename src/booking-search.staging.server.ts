@@ -16,6 +16,15 @@ const POPULAR_TOP_FRACTION = 0.25;
 if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL missing");
 app.use(cors({ origin: true, credentials: false }));
 
+// Keep the established search canonical; booking detail pages live on pin-ngo.com.
+app.use((req, res, next) => {
+  if ((req.method === "GET" || req.method === "HEAD") && req.hostname === "stays.pin-ngo.com"
+    && ["/", "/robots.txt", "/sitemap.xml"].includes(req.path)) {
+    return res.redirect(308, "https://book.pin-ngo.com" + req.originalUrl);
+  }
+  next();
+});
+
 const publicPropertyWhere = {
   status: "ACTIVE" as const,
   isPublicBookable: true,
