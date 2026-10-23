@@ -75,6 +75,10 @@ for provisioning, collision refusal, commercial isolation, session audit and
 expiration. It requires an explicit disposable `pingo_app_review_test` database;
 it never falls back to the production database URL. The shared session guard
 retains its existing E8B TypeScript configuration.
+The PostgreSQL CI run passed on commit `8f9c436b28041efed772ef0d64102e5465524555`,
+including the real login-route import. E8A/E8B's file-scope allowlists now name
+the reviewer files explicitly; schema/core-file prohibitions and all behavioral
+checks remain enabled. No branch-wide exemption was introduced.
 
 The auth route bundles with esbuild and its generated JavaScript passes
 `node --check`. The global `tsc --noEmit` baseline exhausts the default Node heap.
@@ -86,8 +90,8 @@ The pre-existing E7 source-count failure is corrected here: token issuance is
 checked separately in login and authenticated renewal, while signup still may
 not issue any token. CI uses that scoped assertion instead of the stale count.
 
-Before release: complete CI/full backend validation, verify provisioning against
-a disposable PostgreSQL database, then provision and configure under controlled
+Before release: complete CI and assess the documented global compiler limitation,
+then provision and configure under controlled
 deployment. Verify correct/wrong passwords, ordinary-host MFA, organization
 isolation, disabled/expired exception and logout on the actual Host build.
 
