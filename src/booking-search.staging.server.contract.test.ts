@@ -2,6 +2,28 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { initialPublicStays, renderPublicStayHtml } from "./services/public-stay-html";
+
+test("initial HTML exposes booking links and location without JavaScript, safely", async () => {
+  const template = await readFile(new URL("./booking-search.preview.html", import.meta.url), "utf8");
+  const html = renderPublicStayHtml(template, [{ title: '<script>alert("x")</script> $&', bookingPath: "/book/serena-studio/palmasdelmar", city: "Humacao", region: "Puerto Rico", maxGuests: 4, photoUrl: 'https://example.com/photo.jpg" onerror="x' }]);
+  const body = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+  assert.match(body, /href="https:\/\/pin-ngo.com\/book\/serena-studio\/palmasdelmar"/);
+  assert.match(body, /Humacao, Puerto Rico/);
+  assert.match(body, /Hasta 4 huéspedes/);
+  assert.match(body, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; \$&amp;/);
+  assert.doesNotMatch(body, /" onerror="x/);
+  assert.equal((body.match(/class="card"/g) || []).length, 1);
+  assert.ok(html.includes("applyLanguage();load();"), "interactive search remains enabled");
+  const invalid = renderPublicStayHtml(template, [{ title: "private", bookingPath: "/booking/manage/token" }]);
+  assert.ok(!invalid.includes('href="https://pin-ngo.com/booking/manage/token"'));
+});
+
+test("initial catalog failure or timeout preserves the search page", async () => {
+  assert.deepEqual(await initialPublicStays(async () => { throw new Error("unavailable"); }), []);
+  assert.deepEqual(await initialPublicStays(() => new Promise(() => {}), 5), []);
+  assert.deepEqual(await initialPublicStays(async () => ["public"]), ["public"]);
+});
 
 const source = await readFile(
   new URL("./booking-search.staging.server.ts", import.meta.url),
