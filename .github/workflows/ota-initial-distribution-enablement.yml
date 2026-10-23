@@ -55,6 +55,43 @@ jobs:
           SCOPE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           SCOPE_BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
         run: |
+          # BEGIN INDEXNOW_SCOPE_491
+          if [ "${GITHUB_HEAD_REF:-}" = "agent/public-booking-indexnow" ]; then
+            test "$GITHUB_EVENT_NAME" = "pull_request"
+            test "$SCOPE_PR_NUMBER" = "491"
+            test "$GITHUB_REPOSITORY" = "freddiefernandezmaysonet-netizen/pin-go-backend"
+            test "$SCOPE_HEAD_REPO" = "$GITHUB_REPOSITORY"
+            test "$SCOPE_BASE_REPO" = "$GITHUB_REPOSITORY"
+            test "$GITHUB_BASE_REF" = "main"
+            node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {readFileSync} from 'node:fs';
+          const base='8c526a26c464055502fb040577418ba91b99160c';
+          assert.equal(execFileSync('git',['merge-base',base,'HEAD'],{encoding:'utf8'}).trim(),base);
+          const paths=execFileSync('git',['diff','--name-only',base,'HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
+          assert.deepEqual(paths,[ '.github/workflows/ota-airbnb-listing-discovery.yml', '.github/workflows/ota-initial-distribution-enablement.yml', '.github/workflows/public-booking-indexnow.yml', 'src/routes/dashboard.organization.route.ts', 'src/routes/dashboard.properties.route.ts', 'src/services/public-booking-indexnow.service.test.ts', 'src/services/public-booking-indexnow.service.ts' ].sort());
+          const original=p=>execFileSync('git',['show',base+':'+p],{encoding:'utf8'});
+          const importLine='import { capturePublicBookingUrls, notifyPublicBookingChange } from "../services/public-booking-indexnow.service.js";\n';
+          for (const [path, additions] of [
+            ['src/routes/dashboard.properties.route.ts', [importLine, '      const previousPublicUrls = await capturePublicBookingUrls(prisma, orgId, existing.id);\n', '      void notifyPublicBookingChange(prisma, orgId, previousPublicUrls, updated.id);\n']],
+            ['src/routes/dashboard.organization.route.ts', [importLine, '      const previousPublicUrls = await capturePublicBookingUrls(prisma, orgId);\n', '      void notifyPublicBookingChange(prisma, orgId, previousPublicUrls);\n\n']]
+          ]) {
+            let current=readFileSync(path,'utf8');
+            for (const addition of additions) { assert.equal(current.split(addition).length,2); current=current.replace(addition,''); }
+            assert.equal(current,original(path));
+          }
+          for (const workflow of ['.github/workflows/ota-airbnb-listing-discovery.yml', '.github/workflows/ota-initial-distribution-enablement.yml']) {
+          const contents=readFileSync(workflow,'utf8');
+          const start=contents.indexOf('          # BEGIN INDEXNOW_SCOPE_491\n');
+          const end=contents.indexOf('          # END INDEXNOW_SCOPE_491\n',start)+'          # END INDEXNOW_SCOPE_491\n'.length;
+          assert.ok(start>=0 && end>start);
+          assert.equal(contents.slice(0,start)+contents.slice(end),original(workflow));
+          }
+          NODE
+            exit 0
+          fi
+          # END INDEXNOW_SCOPE_491
           if [ "${GITHUB_HEAD_REF:-}" = "agent/host-notification-inbox-20261018" ]; then
             node --test scripts/verify-host-notification-inbox-scope.test.mjs
             node scripts/verify-host-notification-inbox-scope.mjs
