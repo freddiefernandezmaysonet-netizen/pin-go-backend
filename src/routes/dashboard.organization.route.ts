@@ -1,3 +1,4 @@
+import { capturePublicBookingUrls, notifyPublicBookingChange } from "../services/public-booking-indexnow.service.js";
 import { Router } from "express";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
@@ -129,6 +130,7 @@ dashboardOrganizationRouter.patch(
         });
       }
 
+      const previousPublicUrls = await capturePublicBookingUrls(prisma, orgId);
       const organization = await prisma.organization.update({
         where: { id: orgId },
         data,
@@ -140,6 +142,8 @@ dashboardOrganizationRouter.patch(
           updatedAt: true,
         },
       });
+
+      void notifyPublicBookingChange(prisma, orgId, previousPublicUrls);
 
       return res.json({
         organization,
