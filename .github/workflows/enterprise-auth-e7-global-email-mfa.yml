@@ -120,6 +120,8 @@ jobs:
           ! grep -q 'signAuthToken' src/routes/public.signup.success.routes.ts
           ! grep -q 'signSessionBoundAuthToken' src/routes/public.signup.success.routes.ts
           ! grep -q 'Set-Cookie' src/routes/public.signup.success.routes.ts
-          test "$(grep -o 'signSessionBoundAuthToken(' src/routes/auth.routes.ts | wc -l | tr -d ' ')" = "1"
+          # Check issuance in login/authenticated renewal and prohibit it in signup.
+          # The old whole-file count rejected the existing renewal endpoint.
+          node --import tsx --test --test-name-pattern="E7 direct organization registration" src/auth/enterprise-auth-e7.test.ts
           test "$(grep -o 'signSessionBoundAuthToken(' src/auth/mfa-login.routes.ts | wc -l | tr -d ' ')" = "1"
 
