@@ -6,6 +6,7 @@ on:
       - agent/booking-public-stay-search-staging
     paths:
       - "src/services/public-stay-search.service.ts"
+      - "src/services/public-stay-html.ts"
       - "src/services/direct-booking-pricing.service.ts"
       - "tsconfig.booking-search.json"
       - "package.json"

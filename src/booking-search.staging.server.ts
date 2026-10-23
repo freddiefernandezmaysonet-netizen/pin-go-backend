@@ -5,6 +5,7 @@ import path from "path";
 import fs from "fs";
 import { PrismaClient } from "@prisma/client";
 import { searchPublicStays } from "./services/public-stay-search.service";
+import { initialPublicStays, renderPublicStayHtml } from "./services/public-stay-html";
 
 const app = express();
 const prisma = new PrismaClient();
@@ -57,9 +58,17 @@ function publicPropertyPayload(p: any) {
   };
 }
 
-app.get("/", (_q, res) => {
+app.get("/", async (_q, res) => {
   const file = path.resolve(process.cwd(), "src/booking-search.preview.html");
   let html = fs.readFileSync(file, "utf8");
+  const initial = await initialPublicStays(async () => {
+    const items = await prisma.property.findMany({
+      where: publicPropertyWhere, select: publicPropertySelect(),
+      orderBy: { createdAt: "asc" }, take: FEATURED_LIMIT,
+    });
+    return items.map(publicPropertyPayload);
+  });
+  html = renderPublicStayHtml(html, initial);
   const enhancement = `<style>.featuredbadge{display:block!important;width:max-content}.reviewrating{margin:7px 0 10px;color:#173d32;font-size:14px;font-weight:800}.reviewrating span{color:#66736e;font-weight:600}</style><script>(function(){if(typeof card!=='function')return;var baseCard=card;card=function(p){var markup=baseCard(p);var count=Number(p&&p.reviewCount);var rating=Number(p&&p.averageRating);if(!(count>0)||!Number.isFinite(rating))return markup;var reviewWord=document.documentElement.lang==='en'?(count===1?'review':'reviews'):(count===1?'reseña':'reseñas');var reviewHtml='<div class="reviewrating">★ '+rating.toFixed(1)+' <span>· '+count+' '+reviewWord+'</span></div>';return markup.replace('</h3>','</h3>'+reviewHtml);};})();</script>`;
   html = html.replace("</body>", enhancement + "</body>");
   res.type("html").send(html);
