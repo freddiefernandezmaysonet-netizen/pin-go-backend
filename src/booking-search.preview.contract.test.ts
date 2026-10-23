@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { runInNewContext } from "node:vm";
 
 const html = await readFile(
   new URL("./booking-search.preview.html", import.meta.url),
@@ -70,4 +71,15 @@ test("mobile filters avoid duplicated discovery concepts and expose collapsible 
   assert.match(html, /class="filterSection"/);
   assert.match(html, /position:sticky/);
   assert.match(html, /accommodation:'Espacio'/);
+});
+
+
+test("featured and search booking links use the public domain and preserve stay parameters", () => {
+  const source = html.match(/function bookingHref\(p\)\{.*?\}function card/s)?.[0].replace(/function card$/, "");
+  assert.ok(source);
+  const property = { bookingPath: "/book/serena-studio/palmasdelmar" };
+  const href = (lastQuery: unknown) => runInNewContext(source + ";bookingHref(property)", { URLSearchParams, lastQuery, property });
+  assert.equal(href(null), "https://pin-ngo.com/book/serena-studio/palmasdelmar");
+  assert.equal(href({ checkIn: "2026-11-02", checkOut: "2026-11-04", guests: 2 }),
+    "https://pin-ngo.com/book/serena-studio/palmasdelmar?checkIn=2026-11-02&checkOut=2026-11-04&guests=2");
 });
