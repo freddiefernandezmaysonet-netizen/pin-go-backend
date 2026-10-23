@@ -96,8 +96,19 @@ test("E7 direct organization registration no longer issues an auth session", () 
   assert.doesNotMatch(registerSource, /Set-Cookie/);
   assert.match(registerSource, /requiresLogin:\s*true/);
 
-  const totalTokenIssues = source.match(/signSessionBoundAuthToken\(/g) ?? [];
-  assert.equal(totalTokenIssues.length, 1);
+  // Login and authenticated session renewal may issue tokens. Registration may not.
+  // A global count of one incorrectly rejects the existing host renewal route.
+  const loginStart = source.indexOf('authRouter.post("/auth/login"');
+  const logoutStart = source.indexOf('authRouter.post("/auth/logout"');
+  const activityStart = source.indexOf('authRouter.post("/auth/session/activity"');
+  const passwordStart = source.indexOf('authRouter.post("/auth/forgot-password"');
+  assert.ok(loginStart >= 0 && logoutStart > loginStart);
+  assert.ok(activityStart > logoutStart && passwordStart > activityStart);
+  assert.equal((source.slice(loginStart, logoutStart).match(/signSessionBoundAuthToken\(/g) ?? []).length, 1);
+  assert.equal((source.slice(activityStart, passwordStart).match(/signSessionBoundAuthToken\(/g) ?? []).length, 1);
+  assert.match(source.slice(activityStart, passwordStart), /requireAuth/);
+  assert.match(source.slice(activityStart, passwordStart), /activity\.valid/);
+  assert.equal((source.match(/signSessionBoundAuthToken\(/g) ?? []).length, 2);
 });
 
 test("E7 Stripe signup success never auto-logs a new account in", () => {

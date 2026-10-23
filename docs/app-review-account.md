@@ -64,18 +64,27 @@ node --import tsx --test src/auth/app-review-access.test.ts src/auth/app-review-
 npx tsc -p tsconfig.app-review.json
 ```
 
-57 selected tests pass. New code passes the scoped TypeScript check. The actual
+88 selected local tests pass, including E5 through E8B and host session regressions.
+New code passes the strict scoped TypeScript check. The actual
 Express login handler is exercised with synthetic persistence, password, token
 and email boundaries (no production credentials or network calls). Its review
 policy and session creation code are real. PostgreSQL transaction behavior and
-production end-to-end login have NOT been certified by these tests.
+production end-to-end login have NOT been certified by these local tests.
+The dedicated App Review CI workflow additionally runs a real PostgreSQL test
+for provisioning, collision refusal, commercial isolation, session audit and
+expiration. It requires an explicit disposable `pingo_app_review_test` database;
+it never falls back to the production database URL. The shared session guard
+retains its existing E8B TypeScript configuration.
 
 The auth route bundles with esbuild and its generated JavaScript passes
-`node --check`. The global `tsc --noEmit` baseline exhausts the default Node heap
-before any change. An additional E7 suite has one pre-existing failure: its
-registration test expects one token-signing call across the whole auth route,
-but the baseline has two because it also renews host sessions. Reproduced against
-the unmodified baseline; not silently removed or changed in this patch.
+`node --check`. The global `tsc --noEmit` baseline exhausts the default Node heap.
+With a 6 GB heap, it completes with 8,479 diagnostic lines both before and after
+the original patch, with no new distinct diagnostics after normalizing line
+numbers. The root tsconfig also pulls in nested dashboard and legacy files.
+This is not a clean global build and remains a repository-wide limitation.
+The pre-existing E7 source-count failure is corrected here: token issuance is
+checked separately in login and authenticated renewal, while signup still may
+not issue any token. CI uses that scoped assertion instead of the stale count.
 
 Before release: complete CI/full backend validation, verify provisioning against
 a disposable PostgreSQL database, then provision and configure under controlled
