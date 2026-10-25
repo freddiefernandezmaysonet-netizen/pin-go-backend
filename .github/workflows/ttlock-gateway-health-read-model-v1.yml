@@ -1,0 +1,27 @@
+name: TTLock Gateway Health Read Model V1
+
+on:
+  pull_request:
+    paths:
+      - "src/routes/dashboard.health.routes.ts"
+      - "src/routes/dashboard.health.gateways.contract.test.ts"
+      - ".github/workflows/ttlock-gateway-health-read-model-v1.yml"
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - name: Read-model contract
+        run: node --import tsx --test src/routes/dashboard.health.gateways.contract.test.ts
+      - name: Bundle dashboard health router
+        run: npx esbuild src/routes/dashboard.health.routes.ts --bundle --platform=node --packages=external --outfile=/tmp/dashboard.health.routes.js
