@@ -68,7 +68,7 @@ function getMessageReadModel(channel: string, body: string) {
       GUEST_ACCESS_PASSCODE: "Guest access instructions",
       CHECKOUT: "Check-out message",
     };
-    const channels: Record<string, string> = { AIRBNB: "Airbnb", BOOKINGCOM: "Booking.com", EXPEDIA: "Expedia" };
+    const channels: Record<string, string> = { AIRBNB: "Airbnb", BOOKINGCOM: "Booking.com", BOOKING_COM: "Booking.com", EXPEDIA: "Expedia" };
     return {
       subject: null,
       messageType: typeof type === "string" ? type : null,
