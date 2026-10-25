@@ -53,6 +53,30 @@ function getMessageReadModel(channel: string, body: string) {
     displayBody: body,
   };
 
+  if (channel === "channex") {
+    let type: unknown;
+    let provider: unknown;
+    try {
+      const parsed = JSON.parse(body);
+      if (["PIN_GO_OTA_OPERATIONAL_DELIVERY", "PIN_GO_AIRBNB_DELIVERY"].includes(parsed?.kind)) {
+        type = parsed.type;
+        provider = parsed.kind === "PIN_GO_AIRBNB_DELIVERY" ? "AIRBNB" : parsed.provider;
+      }
+    } catch { /* Legacy rows still receive a safe channel summary. */ }
+    const descriptions: Record<string, string> = {
+      PRECHECKIN: "Pre-check-in instructions",
+      GUEST_ACCESS_PASSCODE: "Guest access instructions",
+      CHECKOUT: "Check-out message",
+    };
+    const channels: Record<string, string> = { AIRBNB: "Airbnb", BOOKINGCOM: "Booking.com", BOOKING_COM: "Booking.com", EXPEDIA: "Expedia" };
+    return {
+      subject: null,
+      messageType: typeof type === "string" ? type : null,
+      displayBody: typeof type === "string" ? descriptions[type] ?? "Guest message via booking channel" : "Guest message via booking channel",
+      channelLabel: typeof provider === "string" ? channels[provider.toUpperCase()] ?? "Booking channel" : "Booking channel",
+    };
+  }
+
   if (channel !== "email") {
     return fallback;
   }
@@ -160,6 +184,15 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
         : [];
 
     const propertyNameById = new Map(properties.map((p) => [p.id, p.name]));
+    const reservationIds = [...new Set(items.flatMap(item => {
+      const id = item.reservationId ?? item.accessGrant?.reservation?.id;
+      return id ? [id] : [];
+    }))];
+    const reservations = reservationIds.length ? await prisma.reservation.findMany({
+      where: { id: { in: reservationIds }, property: { organizationId: orgId } },
+      select: { id: true, propertyId: true, reservationNumber: true, guestName: true },
+    }) : [];
+    const reservationById = new Map(reservations.map(r => [r.id, r]));
 
     res.json({
       items: items.map((item) => {
@@ -172,7 +205,13 @@ router.get("/messages", requireOrg(prisma), async (req, res) => {
           item.accessGrant?.reservation?.property?.name ??
           null;
 
+        const reservationId = item.reservationId ?? item.accessGrant?.reservation?.id ?? null;
+        const candidate = reservationId ? reservationById.get(reservationId) : null;
+        const reservation = candidate?.propertyId === resolvedPropertyId ? candidate : null;
         return {
+          guestName: reservation?.guestName ?? null,
+          reservationNumber: reservation?.reservationNumber ?? null,
+          channelLabel: "channelLabel" in readModel ? readModel.channelLabel : null,
           id: item.id,
           channel: item.channel,
           provider: item.provider,
