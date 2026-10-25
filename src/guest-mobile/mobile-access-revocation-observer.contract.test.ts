@@ -9,6 +9,7 @@ test("observer derives mobile revoke work from canonical persisted state", () =>
   assert.match(source, /endsAt: \{ lte: now \}/);
   assert.match(source, /accessGrant: \{ status: \{ in: \["REVOKED", "FAILED"\] \} \}/);
   assert.match(source, /reservation: \{ status: "CANCELLED" \}/);
+  assert.match(source, /guestDeviceSession: \{ revokedAt: \{ not: null \} \}/);
 });
 
 test("observer is DB-only and bounded", () => {

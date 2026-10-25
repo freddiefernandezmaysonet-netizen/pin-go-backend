@@ -35,7 +35,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
-import { ttlockRefreshAccessToken } from "../../ttlock/ttlock.service";
+import { ttlockRefreshAccessToken } from "../../ttlock/ttlock.service.js";
 
 export async function assertOrgTtlockAuthConfigured(
   prisma: PrismaClient,
@@ -101,7 +101,7 @@ export async function getOrgTtlockAccessToken(
       );
 
       const { ttlockGetAccessToken } = await import(
-        "../../ttlock/ttlock.service"
+        "../../ttlock/ttlock.service.js"
       );
 
       const token = await ttlockGetAccessToken();
