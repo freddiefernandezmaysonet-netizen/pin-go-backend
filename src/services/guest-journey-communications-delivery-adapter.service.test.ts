@@ -188,6 +188,64 @@ test("a retry fences the message, preserves recipient/body, and persists provide
   assert.equal(result.completion.kind, "SUCCEEDED");
 });
 
+test("missing, empty and non-string SMS acknowledgements remain uncertain without replay", async () => {
+  for (const providerResult of [{}, undefined, { sid: "" }, { sid: "   " }, { sid: 123 }, { sid: {} }]) {
+    const fixture = fakePrisma({});
+    let calls = 0;
+    const dependencies = {
+      sendSms: async () => { calls++; return providerResult as any; }, sendEmail: noEmail,
+    };
+    const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" });
+    const first = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent,
+      { now, providerTimeoutMs: 50 }, dependencies);
+    assert.equal(first.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(fixture.message.status, "E7_SENDING");
+    assert.equal(fixture.message.providerMessageId, null);
+    assert.equal(fixture.message.retryCount, 1);
+    assert.equal(fixture.message.error, "COMMUNICATION_PROVIDER_ACK_MISSING");
+    assert.ok(!fixture.updates.some(update => update.data.status === "SENT"));
+    const repeated = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent,
+      { now, providerTimeoutMs: 50 }, dependencies);
+    assert.equal(repeated.providerCalls, 0);
+    assert.equal(calls, 1);
+  }
+});
+
+test("email accepted-shaped responses without a message ID do not close delivery", async () => {
+  for (const result of [{ ok: true }, { data: { id: "" } }, { data: { id: null } }]) {
+    const fixture = fakePrisma({ message: {
+      channel: "email", to: "guest@example.com", communicationType: "DIRECT_BOOKING_GUEST_CONFIRMATION",
+      body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: "DIRECT_BOOKING_GUEST_CONFIRMATION", retryPayload: {} }),
+    } });
+    const delivered = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+      claim({ messageLogId: "message-1", communicationType: "DIRECT_BOOKING_GUEST_CONFIRMATION", channel: "email" }),
+      { now, providerTimeoutMs: 50 }, { sendSms: async () => { throw new Error("unexpected SMS"); }, sendEmail: async () => result });
+    assert.equal(delivered.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(fixture.message.status, "E7_SENDING");
+  }
+});
+
+test("all existing valid provider identifier shapes are preserved", async () => {
+  for (const result of [{ sid: " SM-valid " }, { data: { id: "SM-valid" } }, { providerMessageId: "SM-valid" }, { id: "SM-valid" }]) {
+    const fixture = fakePrisma({});
+    const delivered = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+      { now, providerTimeoutMs: 50 }, { sendSms: async () => result as any, sendEmail: noEmail });
+    assert.equal(delivered.completion.kind, "SUCCEEDED");
+    assert.equal(fixture.message.providerMessageId, "SM-valid");
+  }
+});
+
+test("a definite provider rejection retains the existing FAILED retry path", async () => {
+  const fixture = fakePrisma({});
+  await assert.rejects(executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+    claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+    { now, providerTimeoutMs: 50 }, {
+      sendSms: async () => { throw new Error("Provider rejected before acceptance"); }, sendEmail: noEmail,
+    }), /Provider rejected before acceptance/);
+  assert.equal(fixture.message.status, "FAILED");
+});
+
 test("provider timeout leaves an ambiguity fence and blocks automatic duplicate replay", async () => {
   const fixture = fakePrisma({});
   let calls = 0;

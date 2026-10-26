@@ -665,8 +665,33 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw error;
   }
 
-  const providerMessageId = providerResult?.sid ?? providerResult?.data?.id ??
-    providerResult?.providerMessageId ?? providerResult?.id ?? null;
+  const providerMessageId = [providerResult?.sid, providerResult?.data?.id,
+    providerResult?.providerMessageId, providerResult?.id]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? null;
+  if (!providerMessageId) {
+    const uncertain = await prisma.messageLog.updateMany({
+      where: { id: message.id, status: "E7_SENDING" },
+      data: {
+        retryCount: { increment: 1 },
+        error: "COMMUNICATION_PROVIDER_ACK_MISSING",
+      },
+    });
+    if (uncertain.count !== 1) {
+      throw new Error("COMMUNICATION_DELIVERY_RESULT_PERSISTENCE_LOST");
+    }
+    return {
+      providerCalls: 1,
+      completion: {
+        kind: "WAITING_FOR_EVIDENCE",
+        outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: "E7_SENDING", reason: "ACK_MISSING" }),
+        errorCode: "COMMUNICATION_PROVIDER_ACK_MISSING",
+        errorDetail: "The provider returned no valid message identifier; acceptance is uncertain and automatic replay is blocked.",
+        messageLogId,
+        communicationType: requestedType,
+        channel: requestedChannel,
+      },
+    };
+  }
   const persisted = await prisma.messageLog.updateMany({
     where: { id: message.id, status: "E7_SENDING" },
     data: {
