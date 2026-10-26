@@ -22,8 +22,8 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
   let number = 0;
   async function stay(source = "AIRBNB") {
     return db.reservation.create({ data: {
-      propertyId: property.id, guestName: "Synthetic guest", guestPhone: null, guestEmail: null,
-      reservationNumber: `PG-SECURITY-${++number}`, source, externalProvider: "CHANNEX", externalId: randomBytes(16).toString("hex"),
+      propertyId: property.id, guestName: "Synthetic guest", guestPhone: null, guestEmail: ["DIRECT_BOOKING", "EXPEDIA", "VRBO"].includes(source) ? "guest@example.invalid" : null,
+      reservationNumber: `PG-SECURITY-${++number}`, source, externalProvider: source === "DIRECT_BOOKING" ? "PIN_GO_DIRECT" : "CHANNEX", externalId: randomBytes(16).toString("hex"),
       status: "ACTIVE", paymentState: "PAID", preferredLanguage: "es", checkIn: now, checkOut: future,
       guestToken: randomBytes(32).toString("base64url"), guestTokenExpiresAt: future, guestAccessReleaseStatus: "RELEASED",
     } });
@@ -39,7 +39,7 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
   }
 
   await t.test("a copied raw link cannot create the first or any additional OTA session", async () => {
-    for (const provider of ["AIRBNB", "BOOKING_COM"]) {
+    for (const provider of ["AIRBNB", "BOOKING_COM", "DIRECT_BOOKING", "EXPEDIA", "VRBO"]) {
       const r = await stay(provider);
       await assert.rejects(exchangeGuestStayToken(db, { guestToken: r.guestToken, now }), /ACTIVATION_REQUIRED/);
       assert.equal(await db.guestStayLink.count({ where: { reservationId: r.id } }), 0);
@@ -68,6 +68,15 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
     assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
     assert.equal(await db.guestDeviceSession.count({ where: { guestAppActivation: { reservationId: r.id } } }), 1);
   });
+  await t.test("changing the saved email invalidates pending Direct Booking, Expedia and Vrbo verification", async () => {
+    for (const source of ["DIRECT_BOOKING", "EXPEDIA", "VRBO"]) {
+      const r = await stay(source); const c = await challenge(r.guestToken!);
+      await db.reservation.update({ where: { id: r.id }, data: { guestEmail: "changed@example.invalid" } });
+      await assert.rejects(verifyOtaGuestAppActivation(db, { guestToken: r.guestToken!, browserSecret, challengeId: c.id, code: c.code, now }), /INVALID_CODE/);
+      await db.reservation.update({ where: { id: r.id }, data: { guestEmail: null } });
+      await assert.rejects(challenge(r.guestToken!, new Date(+now + 61_000)), /UNAVAILABLE/);
+    }
+  });
   await t.test("every additional device requires fresh channel proof, including recovery on a new phone", async () => {
     const r = await stay();
     const first = await exchangeGuestStayToken(db, { guestToken: await verified(r.guestToken!), now });
@@ -90,7 +99,7 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
     }), /DELIVERY_FAILED/);
     const row = await db.guestAppActivationChallenge.findUniqueOrThrow({ where: { id } });
     assert.equal(row.deliveredAt, null);
-    assert.equal(row.codeHash, activationHash(`${id}:${code}:${browserSecret}`));
+    assert.equal(row.codeHash, activationHash(`${id}:${code}:${browserSecret}:CHANNEX:${r.externalId}`));
     assert.equal(row.guestTokenHash, activationHash(r.guestToken!));
     assert.equal(row.browserHash, activationHash(browserSecret));
     await assert.rejects(verifyOtaGuestAppActivation(db, { guestToken: r.guestToken!, browserSecret, challengeId: id, code, now }), /INVALID_CODE/);

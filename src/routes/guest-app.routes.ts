@@ -2,8 +2,8 @@ import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
-import { resolveChannexOperationalProvider } from "../services/ota-guest-external-messaging.policy.js";
-import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
+import { guestAppVerificationChannel } from "../guest-mobile/guest-app-verification-channel.policy.js";
+import { deliverGuestAppVerification } from "../guest-mobile/guest-app-verification-delivery.service.js";
 import { GuestAppActivationError, activeAppStayWhere, requestOtaGuestAppActivation, verifyOtaGuestAppActivation } from "../guest-mobile/ota-guest-app-activation.service.js";
 
 const STAY_TOKEN = /^[A-Za-z0-9_-]{16,200}$/;
@@ -16,11 +16,13 @@ const headers = (res: Response) => res.set({
   "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 });
 
-function verificationPage(token: string, secret: string, es: boolean, challengeId?: string, notice?: string) {
+function verificationPage(token: string, secret: string, es: boolean, challengeId?: string, notice?: string, channel: "CHANNEX" | "EMAIL" = "CHANNEX") {
+  const destinationEs = channel === "EMAIL" ? "el email de tu reservación" : "la conversación de tu reservación en Airbnb o Booking.com";
+  const destinationEn = channel === "EMAIL" ? "your reservation email" : "your booking conversation in Airbnb or Booking.com";
   return `<!doctype html><html lang="${es ? "es" : "en"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Pin&amp;Go Guest</title>
   <style>body{margin:0;background:#0b1220;color:#e7eefc;font:17px/1.5 system-ui,sans-serif}main{max-width:520px;margin:auto;padding:40px 24px}p{color:#c1cde1}button,input{box-sizing:border-box;width:100%;padding:16px;border-radius:12px;font:inherit;margin:12px 0}button{background:#2563eb;color:white;border:0;font-weight:700}a{color:#9ec5ff}input{border:1px solid #64748b}button:focus-visible,input:focus-visible{outline:3px solid #fbbf24}</style></head><body><main>
   <h1>${es ? "Vincula tu estadía" : "Link your stay"}</h1>
-  <p>${challengeId ? (es ? "Enviamos un código de verificación a la conversación de tu reservación en Airbnb o Booking.com. Escríbelo aquí para autorizar este dispositivo." : "We sent a verification code to your booking conversation in Airbnb or Booking.com. Enter it here to authorize this device.") : (es ? "Para proteger tu acceso, confirma la vinculación con un código que recibirás en la conversación de tu reservación en Airbnb o Booking.com." : "To protect your access, confirm linking with a code sent to your booking conversation in Airbnb or Booking.com.")}</p>
+  <p>${challengeId ? (es ? `Enviamos un código de verificación a ${destinationEs}. Escríbelo aquí para autorizar este dispositivo.` : `We sent a verification code to ${destinationEn}. Enter it here to authorize this device.`) : (es ? `Para proteger tu acceso, confirma la vinculación con un código que recibirás en ${destinationEs}.` : `To protect your access, confirm linking with a code sent to ${destinationEn}.`)}</p>
   ${notice ? `<p role="alert">${notice}</p>` : ""}
   <form method="post" action="/guest/app/${token}/${challengeId ? "verify" : "request"}">
   <input type="hidden" name="csrf" value="${secret}">
@@ -92,15 +94,16 @@ export function buildGuestAppRouter(prisma: PrismaClient, options: {
           property: { status: "ACTIVE" },
           OR: [{ guestStayLink: null }, { guestStayLink: { revokedAt: null } }],
         },
-        select: { preferredLanguage: true, source: true, externalProvider: true, externalId: true },
+        select: { preferredLanguage: true, source: true, externalProvider: true, externalId: true, guestEmail: true },
       });
       if (!reservation) return unavailable();
-      if (resolveChannexOperationalProvider(reservation)) {
+      const channel = guestAppVerificationChannel(reservation);
+      if (!channel) return unavailable();
+      {
         const secret = randomBytes(32).toString("base64url");
         res.cookie(COOKIE, secret, { httpOnly: true, secure: true, sameSite: "strict", path: "/", maxAge: 600_000 });
-        return res.type("html").send(verificationPage(token, secret, /^es/i.test(reservation.preferredLanguage ?? "")));
+        return res.type("html").send(verificationPage(token, secret, /^es/i.test(reservation.preferredLanguage ?? ""), undefined, undefined, channel));
       }
-      return res.type("html").send(renderHandoff(token, reservation.preferredLanguage));
     } catch {
       // Neither the URL nor exception text is logged: both may contain a bearer.
       return res.status(503).type("html").send(
@@ -108,12 +111,7 @@ export function buildGuestAppRouter(prisma: PrismaClient, options: {
       );
     }
   });
-  const deliver = options.deliverVerification ?? (async input => {
-    const result = await deliverOtaOperationalCommunication(prisma, input.reservationId, "GUEST_APP_DEVICE_VERIFICATION", {
-      activationVerification: { challengeId: input.challengeId, code: input.code },
-    });
-    return result?.ok === true;
-  });
+  const deliver = options.deliverVerification ?? (input => deliverGuestAppVerification(prisma, input));
   for (const action of ["request", "verify"] as const) {
     router.post(`/guest/app/:token/${action}`, async (req, res) => {
       headers(res);
@@ -122,14 +120,17 @@ export function buildGuestAppRouter(prisma: PrismaClient, options: {
       if (!STAY_TOKEN.test(token) || !/^[A-Za-z0-9_-]{43}$/.test(secret) || req.body?.csrf !== secret ||
           req.get("sec-fetch-site") === "cross-site") return res.status(403).type("html").send("Verification unavailable / Verificación no disponible");
       let es = false;
+      let channel: "CHANNEX" | "EMAIL" = "EMAIL";
       try {
         const stay = await prisma.reservation.findFirst({ where: { guestToken: token, ...activeAppStayWhere(new Date()) },
-          select: { preferredLanguage: true, source: true, externalProvider: true, externalId: true } });
-        if (!stay || !resolveChannexOperationalProvider(stay)) throw new GuestAppActivationError("UNAVAILABLE");
+          select: { preferredLanguage: true, source: true, externalProvider: true, externalId: true, guestEmail: true } });
+        const destination = stay ? guestAppVerificationChannel(stay) : null;
+        if (!stay || !destination) throw new GuestAppActivationError("UNAVAILABLE");
+        channel = destination;
         es = /^es/i.test(stay.preferredLanguage ?? "");
         if (action === "request") {
           const result = await requestOtaGuestAppActivation(prisma, { guestToken: token, browserSecret: secret }, deliver);
-          return res.type("html").send(verificationPage(token, secret, es, result.id));
+          return res.type("html").send(verificationPage(token, secret, es, result.id, undefined, channel));
         }
         const activationToken = await verifyOtaGuestAppActivation(prisma, {
           guestToken: token, browserSecret: secret, challengeId: String(req.body?.challengeId ?? ""), code: String(req.body?.code ?? "").trim(),
@@ -142,7 +143,7 @@ export function buildGuestAppRouter(prisma: PrismaClient, options: {
           : (es ? "No pudimos completar la verificación. Intenta más tarde o contacta a tu host." : "We could not complete verification. Try later or contact your host.");
         const challengeId = code === "INVALID_CODE" && /^[A-Za-z0-9_-]{32}$/.test(String(req.body?.challengeId ?? "")) ? req.body.challengeId as string : undefined;
         return res.status(code === "RATE_LIMITED" ? 429 : code === "INVALID_CODE" ? 400 : 503).type("html")
-          .send(verificationPage(token, secret, es, challengeId, notice));
+          .send(verificationPage(token, secret, es, challengeId, notice, channel));
       }
     });
   }

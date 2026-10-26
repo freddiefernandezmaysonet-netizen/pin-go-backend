@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { resolveChannexOperationalProvider } from "../services/ota-guest-external-messaging.policy.js";
+import { guestAppVerificationChannel } from "./guest-app-verification-channel.policy.js";
 
 export const activationHash = (value: string) => createHash("sha256").update(value).digest("hex");
 export const ACTIVATION_PREFIX = "gact_";
@@ -39,9 +39,9 @@ export async function requestOtaGuestAppActivation(
   const challenge = await prisma.$transaction(async tx => {
     const stay = await tx.reservation.findFirst({
       where: { guestToken: input.guestToken, ...activeAppStayWhere(now) },
-      select: { id: true, source: true, externalProvider: true, externalId: true, checkOut: true, guestTokenExpiresAt: true },
+      select: { id: true, source: true, externalProvider: true, externalId: true, guestEmail: true, checkOut: true, guestTokenExpiresAt: true },
     });
-    if (!stay || !resolveChannexOperationalProvider(stay)) throw new GuestAppActivationError("UNAVAILABLE");
+    if (!stay || !guestAppVerificationChannel(stay)) throw new GuestAppActivationError("UNAVAILABLE");
     await lockAppStay(tx, stay.id);
     const recent = await tx.guestAppActivationChallenge.count({
       where: { reservationId: stay.id, createdAt: { gt: new Date(now.getTime() - 3_600_000) } },
@@ -52,7 +52,7 @@ export async function requestOtaGuestAppActivation(
     if (cooldown || recent >= 5) throw new GuestAppActivationError("RATE_LIMITED");
     return tx.guestAppActivationChallenge.create({ data: {
       id, reservationId: stay.id, guestTokenHash: activationHash(input.guestToken),
-      browserHash: activationHash(input.browserSecret), codeHash: activationHash(`${id}:${code}:${input.browserSecret}`),
+      browserHash: activationHash(input.browserSecret), codeHash: activationHash(`${id}:${code}:${input.browserSecret}:${verificationTarget(stay)}`),
       createdAt: now, expiresAt: new Date(Math.min(now.getTime() + TEN_MINUTES, +stay.checkOut, +stay.guestTokenExpiresAt!)),
     } });
   });
@@ -83,12 +83,12 @@ export async function verifyOtaGuestAppActivation(
         challenge.guestTokenHash !== activationHash(input.guestToken)) return false;
     const stay = await tx.reservation.findFirst({
       where: { id: challenge.reservationId, guestToken: input.guestToken, ...activeAppStayWhere(now) },
-      select: { checkOut: true, guestTokenExpiresAt: true },
+      select: { checkOut: true, guestTokenExpiresAt: true, guestEmail: true, source: true, externalProvider: true, externalId: true },
     });
-    if (!stay) return false;
+    if (!stay || !guestAppVerificationChannel(stay)) return false;
     // Commit failed attempts instead of throwing inside the transaction and rolling them back.
     await tx.guestAppActivationChallenge.update({ where: { id: challenge.id }, data: { attempts: { increment: 1 } } });
-    if (!/^\d{6}$/.test(input.code) || challenge.codeHash !== activationHash(`${challenge.id}:${input.code}:${input.browserSecret}`)) return false;
+    if (!/^\d{6}$/.test(input.code) || challenge.codeHash !== activationHash(`${challenge.id}:${input.code}:${input.browserSecret}:${verificationTarget(stay)}`)) return false;
     await tx.guestAppActivationChallenge.update({ where: { id: challenge.id }, data: {
       verifiedAt: now, activationTokenHash: activationHash(activationToken),
       activationExpiresAt: new Date(Math.min(now.getTime() + 120_000, +stay.checkOut, +stay.guestTokenExpiresAt!)),
@@ -97,4 +97,10 @@ export async function verifyOtaGuestAppActivation(
   });
   if (!result) throw new GuestAppActivationError("INVALID_CODE");
   return activationToken;
+}
+
+// Recipient changes invalidate pending verification, without persisting an email in the challenge.
+function verificationTarget(stay: Parameters<typeof guestAppVerificationChannel>[0]) {
+  return guestAppVerificationChannel(stay) === "CHANNEX"
+    ? `CHANNEX:${stay.externalId}` : `EMAIL:${stay.guestEmail?.trim().toLowerCase()}`;
 }

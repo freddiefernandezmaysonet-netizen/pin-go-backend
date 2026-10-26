@@ -7,6 +7,7 @@ on:
       - "src/routes/guest.routes.ts"
       - "src/guest-mobile/guest-mobile-session.service.ts"
       - "src/guest-mobile/ota-guest-app-activation.service.ts"
+      - "src/guest-mobile/guest-app-verification*"
       - "prisma/schema.prisma"
       - "prisma/migrations/20261026030000_ota_guest_app_activation/**"
       - "tsconfig.guest-app-handoff.json"
@@ -49,6 +50,10 @@ jobs:
       - run: npx prisma validate
       - name: Apply activation migration to a populated previous schema
         run: |
+          if git cat-file -e "$HANDOFF_BASE_SHA:prisma/migrations/20261026030000_ota_guest_app_activation/migration.sql"; then
+            echo "Activation migration is already present in the base; final schema is tested below."
+            exit 0
+          fi
           git show "$HANDOFF_BASE_SHA:prisma/schema.prisma" > "$RUNNER_TEMP/guest-app-base.prisma"
           npx prisma db push --schema "$RUNNER_TEMP/guest-app-base.prisma" --skip-generate
           npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL'
@@ -71,5 +76,7 @@ jobs:
         run: npx tsx --test src/routes/guest-app.db.test.ts
       - name: OTA activation security, copied links and concurrent redemption
         run: npx tsx --test src/routes/guest-app-activation-security.db.test.ts
+      - name: Verification email transport and channel routing
+        run: node --import tsx --test src/guest-mobile/guest-app-verification-delivery.test.ts
       - name: Existing email fallback and mobile authorization contracts
         run: npx tsx --test src/services/precheckin-email-fallback.contract.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts

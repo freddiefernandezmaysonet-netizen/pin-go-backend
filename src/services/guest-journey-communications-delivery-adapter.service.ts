@@ -1,4 +1,5 @@
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
+import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
@@ -219,6 +220,7 @@ async function defaultSendEmail(input: {
         input.organizationId
       );
       return sendGuestAccessPasscodeEmail({
+        guestAppUrl: guestAppActivationUrl(grant.reservation, new Date(), process.env),
         arrivalLocation: formatPropertyArrivalLocation(grant.reservation.property, grant.reservation.preferredLanguage),
         to: input.to,
         replyTo: replyTo.email,

@@ -73,6 +73,7 @@ export type SendGuestPreCheckinEmailInput = {
 };
 
 type SendGuestAccessPasscodeEmailInput = {
+  guestAppUrl?: string | null;
   arrivalLocation?: string | null;
   to: string;
   replyTo?: string | null;
@@ -2331,6 +2332,9 @@ export async function sendGuestAccessPasscodeEmail(
   const dateTimeZone =
     normalizePropertyTimeZone(propertyTimeZone);
 
+  const guestAppUrl = input.guestAppUrl ? getSafeUrl(input.guestAppUrl) : null;
+  const guestAppBlock = guestAppUrl ? `<div style="border:1px solid #cbd5e1;border-radius:14px;padding:20px;margin:20px 0"><h2>Pin&amp;Go Guest</h2><p>${isSpanish ? "Tu estadía, a tu alcance. Vincula tu reservación para consultar tu acceso desde la app." : "Your stay, at your fingertips. Link your reservation to view your access in the app."}</p><a href="${escapeHtml(guestAppUrl)}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700">${isSpanish ? "Vincular Pin&amp;Go Guest" : "Link Pin&amp;Go Guest"}</a><p>${isSpanish ? "Confirma tu dispositivo con el código de verificación que enviaremos al email de tu reservación. Si aún no tienes la app, instálala y vuelve a abrir este enlace. La app es opcional. No compartas este enlace." : "Confirm your device with the verification code we will send to your reservation email. If you have not installed the app, install it and reopen this link. The app is optional. Do not share this link."}</p></div>` : "";
+
   if (!resend) {
     if (isProd) {
       throw new Error(
@@ -2427,6 +2431,7 @@ export async function sendGuestAccessPasscodeEmail(
               : "This access credential is personal. Do not share it with anyone who is not included in your reservation."}
           </p>
 
+          ${guestAppBlock}
           <p>
             Pin&Go
           </p>
