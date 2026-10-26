@@ -95,6 +95,28 @@ function fixture(source = "BookingCom") {
   };
 }
 
+test("preflight identifies invalid thread metadata without exposing payloads", async () => {
+  const f = fixture();
+  f.threadData.attributes.last_message = { private: "do not log this" };
+  const result = await f.send();
+  assert.equal(result?.error, "OTA_OPERATIONAL_PREFLIGHT_THREAD_LIST_HOST_INBOX_RESPONSE_INVALID");
+  assert.equal(f.posts, 0);
+  assert.doesNotMatch(JSON.stringify(result), /private|do not log/);
+});
+
+test("preflight categorizes internal failures without revealing exception details", async () => {
+  const f = fixture();
+  let reads = 0;
+  f.prisma.reservation.findUnique = async () => {
+    if (++reads > 1) throw Error("private database credential");
+    return structuredClone(f.reservation);
+  };
+  const result = await f.send();
+  assert.equal(result?.error, "OTA_OPERATIONAL_PREFLIGHT_RESERVATION_RECHECK_INTERNAL");
+  assert.equal(f.posts, 0);
+  assert.doesNotMatch(JSON.stringify(result), /private|credential/);
+});
+
 for (const source of ["BookingCom", "Airbnb"]) {
   test(source + " sends access once without a phone/email", async () => {
     const f = fixture(source);
