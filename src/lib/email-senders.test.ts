@@ -67,8 +67,9 @@ test("approved identities reach Resend independently of the legacy sender", asyn
         assert.equal(requests[before]?.from, expectedFrom);
         assert.equal(requests[before + 1]?.from, expectedFrom);
         if (name === "sendGuestAccessPasscodeEmail") {
-          assert.ok(requests[before]?.html.includes(fixture.guestAppUrl));
-          assert.match(requests[before]?.html, /email de tu reservación/);
+          const html = requests[before]?.html ?? "";
+          assert.ok(html.includes(fixture.guestAppUrl));
+          assert.match(html, /email de tu reservación/);
         }
         if (["sendGuestAccessPasscodeEmail", "sendGuestPreCheckinEmail", "sendDirectBookingGuestConfirmation"].includes(name)) {
           assert.equal(requests[before]?.reply_to, "host@example.com");
