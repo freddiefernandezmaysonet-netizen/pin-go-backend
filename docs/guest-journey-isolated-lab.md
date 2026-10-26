@@ -21,10 +21,12 @@ NODE_ENV=test
 GUEST_JOURNEY_LAB_MODE=simulation
 GUEST_JOURNEY_LAB_ROLE=api|communications|monitor
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS=AIRBNB,BOOKING_COM
 ```
 
 Railway supplies the project/environment identity. The entry point rejects any other identity,
 database name/user/host, external provider configuration and enabled production journey flags.
+The canonical OTA channel policy is mandatory; a missing or incomplete value prevents startup.
 The process installs a deny-all Node HTTP/HTTPS/fetch/TCP/TLS fence before importing product code.
 Prisma's native engine receives only the validated private database URL. This is an application
 process fence, not a claim that Railway has a network firewall installed.
@@ -66,6 +68,9 @@ Deploy the API successfully before the two workers. The API healthcheck is `/rea
 
 The fixture outboxes are explicit. They do not prove that reservation creation, modification,
 cancellation or checkout independently materialize every required communication.
+Fixture identifiers include the deployed commit prefix, exposed as `fixtureRevision` in the evidence.
+A new commit gets independent synthetic fixtures; older attempts remain in the database.
+Restarts of the same pinned commit reuse the same records and must not increase provider calls.
 The read-only page is an evidence monitor, not a replacement for the product's Mission Control.
 
 ## Controlled operation

@@ -12,7 +12,7 @@ test("real E4/E7 persists claims, simulated receipts and uncertain results witho
   await lab.seedLabFixtures();
   await lab.runCommunicationsProbe();
   const first = await lab.readLabEvidence();
-  const message = (scenario: string) => first.messages.find(row => row.id === `gj_lab_message_${scenario}`)!;
+  const message = (scenario: string) => first.messages.find(row => row.id === lab.fixtureMessageId(scenario))!;
   assert.equal(message("accepted").status, "SENT");
   assert.equal(message("accepted").providerDeliveryStatus, "DELIVERED");
   assert.equal(message("empty_ack").status, "E7_SENDING");

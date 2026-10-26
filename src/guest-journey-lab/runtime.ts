@@ -5,8 +5,11 @@ import { executeGuestJourneyCommunicationDeliveryAdapter } from "../services/gue
 import { recordMessageDeliveryOutcome } from "../services/guest-journey-communications-delivery-outcome.service";
 
 export const prisma = new PrismaClient();
+export const fixtureRevision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12);
+export const fixtureMessageId = (scenario: string) => `gj_lab_${fixtureRevision}_message_${scenario}`;
+const fixtureReservationId = (scenario: string) => `gj_lab_${fixtureRevision}_${scenario}`;
 const organizationId = "gj_lab_organization";
-const propertyId = "gj_lab_property";
+const propertyId = `gj_lab_property_${fixtureRevision}`;
 const scope = { organizationId, propertyId };
 const scenarios = ["accepted", "empty_ack", "timeout", "ota_channel"] as const;
 
@@ -33,7 +36,7 @@ export async function seedLabFixtures(): Promise<void> {
       id: propertyId, organizationId, name: "Synthetic test property", timezone: "America/Puerto_Rico",
     } });
     for (const scenario of scenarios) {
-      const reservationId = `gj_lab_${scenario}`;
+      const reservationId = fixtureReservationId(scenario);
       if (await tx.reservation.findUnique({ where: { id: reservationId } })) continue;
       const now = Date.now();
       await tx.reservation.create({ data: {
@@ -48,7 +51,7 @@ export async function seedLabFixtures(): Promise<void> {
         guestJourney: { create: {} },
       } });
       await tx.messageLog.create({ data: {
-        id: `gj_lab_message_${scenario}`, ...scope, reservationId,
+        id: fixtureMessageId(scenario), ...scope, reservationId,
         channel: "sms", communicationType: "PRECHECKIN", provider: "twilio",
         to: "+15005550006", body: "SIMULATION ONLY: synthetic pre-check-in notice",
         status: "APMS_PENDING",
@@ -58,7 +61,7 @@ export async function seedLabFixtures(): Promise<void> {
   // Real E4 creates intents from the fixture outbox. This does not prove that
   // reservation events generate every required first-send obligation.
   for (const scenario of scenarios) {
-    const reservationId = `gj_lab_${scenario}`;
+    const reservationId = fixtureReservationId(scenario);
     const existing = await prisma.guestJourneyCoordinationIntent.count({ where: {
       reservationId, targetEngine: "COMMUNICATIONS",
     } });
@@ -81,8 +84,8 @@ export async function runCommunicationsProbe(): Promise<unknown> {
   }, { dependencies: {
     execute: async (db, claim, options) => {
       const messageId = String(claim.payload.messageLogId);
-      const scenario = scenarios.find(value => claim.reservationId === `gj_lab_${value}`);
-      if (!scenario || messageId !== `gj_lab_message_${scenario}`) {
+      const scenario = scenarios.find(value => claim.reservationId === fixtureReservationId(value));
+      if (!scenario || messageId !== fixtureMessageId(scenario)) {
         throw new Error("GJ_LAB_UNKNOWN_FIXTURE_REJECTED");
       }
       const send = async () => {
@@ -100,7 +103,7 @@ export async function runCommunicationsProbe(): Promise<unknown> {
       });
     },
   } });
-  const accepted = await prisma.messageLog.findUnique({ where: { id: "gj_lab_message_accepted" } });
+  const accepted = await prisma.messageLog.findUnique({ where: { id: fixtureMessageId("accepted") } });
   if (accepted?.providerMessageId && accepted.providerDeliveryStatus !== "DELIVERED") {
     await recordMessageDeliveryOutcome(prisma, {
       provider: "twilio", providerMessageId: accepted.providerMessageId,
@@ -124,14 +127,16 @@ export async function readLabEvidence() {
       leaseExpiresAt: true, nextActionAt: true, succeededAt: true, lastError: true,
     } }),
     prisma.$queryRaw<Array<{ scenario: string; calls: number }>>`SELECT scenario, COUNT(*)::int AS calls
-      FROM guest_journey_lab.provider_call GROUP BY scenario ORDER BY scenario`,
+      FROM guest_journey_lab.provider_call
+      WHERE message_id IN (${Prisma.join(scenarios.map(fixtureMessageId))})
+      GROUP BY scenario ORDER BY scenario`,
     prisma.$queryRaw<Array<{ role: string; commit_sha: string; observed_at: Date; details: unknown }>>`
       SELECT role, commit_sha, observed_at, details FROM guest_journey_lab.heartbeat ORDER BY role`,
     prisma.operationalIssue.count({ where: { organizationId, propertyId } }),
     prisma.guestJourneyCoordinationIntentAttempt.count({ where: { intent: { reservation: { propertyId } } } }),
   ]);
   return {
-    mode: "SIMULATION_ONLY", productionReady: false, externalProviderCallsAllowed: false,
+    mode: "SIMULATION_ONLY", fixtureRevision, productionReady: false, externalProviderCallsAllowed: false,
     coverage: "E4/E7 outbox, claims, simulated send, callback persistence and replay; not full reservation certification",
     knownGaps: ["timeout recovery", "all-event first-send parity", "delivery-gated completion", "host Mission Control parity"],
     messages, intents, calls, workers, operationalIssues: issues, durableAttempts: attempts,

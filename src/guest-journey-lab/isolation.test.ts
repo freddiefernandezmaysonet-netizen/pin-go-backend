@@ -9,6 +9,7 @@ const valid = (): NodeJS.ProcessEnv => ({
   RAILWAY_ENVIRONMENT_NAME: "guest-journey-test",
   GUEST_JOURNEY_LAB_MODE: "simulation",
   NODE_ENV: "test",
+  OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS: "AIRBNB,BOOKING_COM",
   DATABASE_URL: "postgresql://guest_journey_lab:synthetic-test-password@postgres.railway.internal:5432/guest_journey_lab",
 });
 
@@ -28,6 +29,14 @@ test("rejects public, production, alternate, malformed and parameter-overridden 
     "postgresql://guest_journey_lab:p@127.0.0.1:5432/guest_journey_lab",
     "not-a-url",
   ]) assert.throws(() => assertLabEnvironment({ ...valid(), DATABASE_URL: url }), /DATABASE_/);
+});
+
+test("requires the canonical OTA channel policy before any fixture can execute", () => {
+  for (const value of [undefined, "", "AIRBNB", "BOOKING_COM"]) {
+    assert.throws(() => assertLabEnvironment({ ...valid(),
+      OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS: value,
+    }), /CHANNEL_POLICY_REQUIRED/);
+  }
 });
 
 test("rejects provider credentials and real worker activation flags without printing values", () => {

@@ -36,6 +36,7 @@ jobs:
       RAILWAY_ENVIRONMENT_NAME: guest-journey-test
       GUEST_JOURNEY_LAB_MODE: simulation
       GUEST_JOURNEY_LAB_ROLE: api
+      OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS: AIRBNB,BOOKING_COM
       DATABASE_URL: postgresql://guest_journey_lab:synthetic-ci-password@postgres.railway.internal:5432/guest_journey_lab
     steps:
       - uses: actions/checkout@v4

@@ -21,6 +21,9 @@ export function assertLabEnvironment(env: NodeJS.ProcessEnv): URL {
     /^(ACCESS_CODE_ENC_KEY_BASE64|NFC_.*SECRET|GUEST_TOKEN_SECRET)$/.test(key)
   ));
   if (forbidden.length) throw new Error(`GJ_LAB_PROVIDER_CONFIGURATION_REJECTED:${forbidden.sort().join(",")}`);
+  if (env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS !== "AIRBNB,BOOKING_COM") {
+    throw new Error("GJ_LAB_CHANNEL_POLICY_REQUIRED");
+  }
   for (const key of Object.keys(env)) {
     if (key.startsWith("GUEST_JOURNEY_") && (key.endsWith("_EXECUTE") || key.endsWith("_ENABLED")) &&
         !["", "0", "false", "off"].includes(String(env[key] ?? "").trim().toLowerCase())) {
