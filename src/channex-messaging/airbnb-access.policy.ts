@@ -1,6 +1,20 @@
 import { createHash } from "node:crypto";
 
-export type AirbnbCommunicationType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "CHECKOUT";
+export type AirbnbCommunicationType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT";
+
+export function guestAppActivationUrl(input: {
+  guestToken?: string | null; guestTokenExpiresAt?: Date | null;
+  guestStayLink?: { revokedAt: Date | null } | null;
+}, now: Date, env: NodeJS.ProcessEnv): string | null {
+  if (!input.guestToken || !/^[A-Za-z0-9_-]{16,200}$/.test(input.guestToken) ||
+      !input.guestTokenExpiresAt || input.guestTokenExpiresAt <= now || input.guestStayLink?.revokedAt) return null;
+  try {
+    const base = new URL(env.PUBLIC_API_BASE_URL ?? env.API_BASE_URL ?? "https://api.pin-ngo.com");
+    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash ||
+        base.pathname !== "/") return null;
+    return `${base.origin}/guest/app/${encodeURIComponent(input.guestToken)}`;
+  } catch { return null; }
+}
 export type AirbnbScope = {
   id: string;
   source?: string | null;
@@ -39,9 +53,15 @@ export function airbnbDeliveryId(input: AirbnbScope & {
 export function buildAirbnbAccessText(input: {
   type: AirbnbCommunicationType; propertyName: string; language: string | null;
   timezone: string; checkIn: Date; checkOut: Date;
-  code?: string; unlockKey?: string; address?: string | null; arrivalLocation?: string;
+  code?: string; unlockKey?: string; address?: string | null; arrivalLocation?: string; guestAppUrl?: string;
 }): string {
   const es = input.language?.toLowerCase().startsWith("es");
+  if (input.type === "GUEST_APP_ACTIVATION") {
+    if (!input.guestAppUrl) throw new Error("GUEST_APP_LINK_UNAVAILABLE");
+    return es
+      ? `Pin&Go Guest · ${input.propertyName}\nTu estadía, a tu alcance.\nAbre este enlace privado y toca “Abrir en Pin&Go Guest” para vincular tu reservación:\n${input.guestAppUrl}\nSi aún no tienes la app, instálala y vuelve a abrir este mismo enlace. También puedes continuar en el navegador. La app es opcional. No compartas este enlace.`
+      : `Pin&Go Guest · ${input.propertyName}\nYour stay, at your fingertips.\nOpen this private link and tap “Open in Pin&Go Guest” to link your reservation:\n${input.guestAppUrl}\nIf you have not installed the app, install it and open this same link again. You can also continue in your browser. The app is optional. Do not share this link.`;
+  }
   const format = new Intl.DateTimeFormat(es ? "es-PR" : "en-US", {
     timeZone: input.timezone, dateStyle: "medium", timeStyle: "short",
   });

@@ -52,8 +52,8 @@ test("disabling OTA switch avoids all scans", async () => {
 test("Airbnb and Booking.com without guest contact are scanned; Expedia remains untouched", async () => {
   const f = fixture([row("1", "BookingCom"), row("2", "Airbnb"), row("3", "Expedia")]);
   const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
-  assert.deepEqual(result, { candidates: 2, accepted: 4, blocked: 0 });
-  assert.equal(f.calls.length, 4);
+  assert.deepEqual(result, { candidates: 2, accepted: 6, blocked: 0 });
+  assert.equal(f.calls.length, 6);
   assert.ok(f.calls.includes("1:PRECHECKIN"));
   assert.ok(f.calls.includes("1:GUEST_ACCESS_PASSCODE"));
   assert.ok(f.calls.includes("2:PRECHECKIN"));
@@ -66,9 +66,9 @@ test("pagination visits every candidate across the first 100 rows and beyond", a
   const f = fixture(rows);
   const result = await processOtaOperationalCommunications(f.db, env, now, f.deliver, f.reconcile);
   assert.equal(result.candidates, 101);
-  assert.equal(result.accepted, 202);
+  assert.equal(result.accepted, 303);
   assert.equal(f.queries, 2);
-  assert.equal(new Set(f.calls).size, 202);
+  assert.equal(new Set(f.calls).size, 303);
 });
 
 test("new scan starts at first page; no persistent in-memory cursor", async () => {
@@ -78,4 +78,16 @@ test("new scan starts at first page; no persistent in-memory cursor", async () =
   assert.equal(one.candidates, 1);
   assert.equal(two.candidates, 1);
   assert.equal(f.queries, 2);
+});
+
+test("activation is not attempted until access delivery is accepted", async () => {
+  const f = fixture([row("a")]);
+  const calls: string[] = [];
+  const deliver = (async (_db: unknown, _id: string, type: string) => {
+    calls.push(type);
+    return { ok: false, status: "FAILED", error: "OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN" };
+  }) as typeof deliverOtaOperationalCommunication;
+  await processOtaOperationalCommunications(f.db, env, now, deliver, f.reconcile);
+  assert.ok(calls.includes("GUEST_ACCESS_PASSCODE"));
+  assert.ok(!calls.includes("GUEST_APP_ACTIVATION"));
 });

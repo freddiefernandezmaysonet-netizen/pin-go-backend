@@ -35,7 +35,7 @@ function renderHandoff(token: string, preferredLanguage: string | null) {
   <h1>${es ? "Tu estancia en Pin&amp;Go Guest" : "Your stay in Pin&amp;Go Guest"}</h1>
   <p>${es ? "Si tienes la app instalada en este dispositivo, abre tu reserva con este botón." : "If the app is installed on this device, open your reservation using this button."}</p>
   <a class="primary" href="pingo-guest://stay/${token}">${es ? "Abrir en Pin&amp;Go Guest" : "Open in Pin&amp;Go Guest"}</a>
-  <p>${es ? "Si la app no abre o no está instalada, continúa en el navegador. No necesitas recibir SMS. Guarda el correo con tu enlace privado para volver a entrar." : "If the app does not open or is not installed, continue in your browser. You do not need to receive SMS. Keep the email with your private link to return to your stay."}</p>
+  <p>${es ? "Si la app no abre o no está instalada, continúa en el navegador. No necesitas recibir SMS. Si instalas la app, vuelve a abrir este mismo enlace para vincular tu reservación. Guarda este mensaje para volver a entrar." : "If the app does not open or is not installed, continue in your browser. You do not need to receive SMS. After installing the app, open this same link again to link your reservation. Keep this message to return to your stay."}</p>
   <a href="/guest/verify/${token}">${es ? "Continuar en el navegador" : "Continue in browser"}</a>
   <p>${es ? "Abrir la app no libera el acceso a la propiedad. Los requisitos de registro y el horario de check-in siguen aplicando. No compartas este enlace privado." : "Opening the app does not release property access. Registration requirements and check-in times still apply. Do not share this private link."}</p>
 </main></body></html>`;

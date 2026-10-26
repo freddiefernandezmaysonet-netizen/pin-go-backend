@@ -13,7 +13,7 @@ import {
   type InboxRequest, type Thread,
 } from "./host-inbox.js";
 import {
-  buildAirbnbAccessText, type AirbnbCommunicationType,
+  buildAirbnbAccessText, guestAppActivationUrl, type AirbnbCommunicationType,
 } from "./airbnb-access.policy.js";
 import {
   deliverAirbnbCommunication, type AirbnbDeliveryResult,
@@ -21,6 +21,7 @@ import {
 
 const reservationInclude = {
   property: true,
+  guestStayLink: { select: { revokedAt: true } },
   accessGrants: { include: { secureAccessCode: true } },
 } as const;
 
@@ -97,6 +98,9 @@ export async function deliverOtaOperationalCommunication(
     ? { ok: true, status: "SENT", replayed: true }
     : failure("OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN");
 
+  const guestAppUrl = type === "GUEST_APP_ACTIVATION" ? guestAppActivationUrl(r, now, env) : null;
+  if (type === "GUEST_APP_ACTIVATION" && (!guestAppUrl || r.guestAccessReleaseStatus !== "RELEASED" || now >= r.checkOut))
+    return failure("OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
   const config = resolveOtaConnectionCenterConfig(env);
   if (!config.enabled && !options.request) return failure("OTA_OPERATIONAL_TRANSPORT_DISABLED");
   const request = options.request ?? (config.enabled
@@ -163,6 +167,7 @@ export async function deliverOtaOperationalCommunication(
     // Existing OTA-neutral Pin&Go text builder, retained for Airbnb parity.
     const text = buildAirbnbAccessText({
       type, propertyName: r.property.name, language: r.preferredLanguage,
+      ...(guestAppUrl ? { guestAppUrl } : {}),
       arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),
       timezone: r.property.timezone, checkIn: r.checkIn, checkOut: r.checkOut,
       address: r.property.address1,
