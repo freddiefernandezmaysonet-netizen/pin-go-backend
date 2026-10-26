@@ -18,7 +18,8 @@ function fixture() {
     guestAccessReleaseStatus: "RELEASED", guestAccessReleasedAt: now,
     property: { id: "prop", organizationId: "org", name: "Test property", timezone: "America/Puerto_Rico", address1: "Test address" },
     accessGrants: [{ id: "grant", type: "GUEST", method: "PASSCODE_TIMEBOUND", status: "ACTIVE", startsAt: checkIn, endsAt: checkOut,
-      lastAppliedAt: now, unlockKey: "#", secureAccessCode: { accessCodeHash: "hash", accessCodeEnc: "encrypted" } }],
+      lastAppliedAt: now, unlockKey: "#", secureAccessCode: { accessCodeHash: "hash", accessCodeEnc: "encrypted",
+        startDate: BigInt(checkIn.getTime()), endDate: BigInt(checkOut.getTime()) } }],
   };
   const data: any = { id: thread, type: "message_thread", attributes: { title: "Test", provider: "AirBNB", is_closed: false, message_count: 0, last_message: null, updated_at: now.toISOString() },
     relationships: { property: relation("property", remote), booking: relation("booking", booking) } };
@@ -106,4 +107,16 @@ test("arrival and departure respect their schedule", async () => {
 test("access text contains both validity dates, timezone and unlock key", () => {
   const f = fixture(); const text = buildAirbnbAccessText({ type: "GUEST_ACCESS_PASSCODE", propertyName: "Test", language: "en", timezone: "America/Puerto_Rico", checkIn: f.r.checkIn, checkOut: f.r.checkOut, code: "987654", unlockKey: "*" });
   assert.match(text, /Valid from.*until/); assert.match(text, /America\/Puerto_Rico/); assert.match(text, /press \*/);
+});
+
+test("Airbnb recheck detects changed BigInt access validity", async () => {
+  const f = fixture();
+  let reads = 0;
+  f.prisma.reservation.findUnique = async () => {
+    const r = structuredClone(f.r);
+    if (++reads >= 2) r.accessGrants[0].secureAccessCode.endDate += 1n;
+    return r;
+  };
+  assert.equal((await f.send())?.error, "AIRBNB_RESERVATION_CHANGED");
+  assert.equal(f.posts, 0);
 });

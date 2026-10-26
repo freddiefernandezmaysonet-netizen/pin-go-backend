@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { isDeepStrictEqual } from "node:util";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { decryptAccessCode } from "../services/access-code-crypto.service.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
@@ -71,7 +72,7 @@ export async function deliverAirbnbCommunication(
     if (detail.thread.bookingId !== r.externalId || detail.thread.provider.toLowerCase() !== "airbnb" || detail.thread.isClosed) return fail("AIRBNB_THREAD_NOT_ELIGIBLE");
     const current = await prisma.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude });
     // Compare current scope and credential evidence immediately before the durable send fence.
-    if (!current || JSON.stringify(current) !== JSON.stringify(r)) return fail("AIRBNB_RESERVATION_CHANGED");
+    if (!current || !isDeepStrictEqual(current, r)) return fail("AIRBNB_RESERVATION_CHANGED");
     const code = grant?.secureAccessCode?.accessCodeEnc ? (options.decrypt ?? decryptAccessCode)(grant.secureAccessCode.accessCodeEnc) : undefined;
     const text = buildAirbnbAccessText({ type, propertyName: r.property.name, language: r.preferredLanguage,
       arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),

@@ -60,7 +60,7 @@ export async function reconcileOtaOperationalDeliveryAttention(
   } = { upsert: upsertOperationalIssue, reopen: reopenOperationalIssue },
 ): Promise<"CREATED" | "UPDATED" | "REOPENED" | "RESOLVED" | "UNCHANGED"> {
   const reason = String(input.error ?? "").trim().toUpperCase();
-  if (!input.ok && !ACTIONABLE_ERRORS.has(reason)) return "UNCHANGED";
+  if (!input.ok && !ACTIONABLE_ERRORS.has(reason) && !reason.startsWith("OTA_OPERATIONAL_PREFLIGHT_")) return "UNCHANGED";
   const operationalKey = otaOperationalIssueKey(input);
   const existing = await prisma.operationalIssue.findUnique({
     where: { operationalKey },
