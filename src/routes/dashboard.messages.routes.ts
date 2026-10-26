@@ -67,6 +67,7 @@ function getMessageReadModel(channel: string, body: string) {
       PRECHECKIN: "Pre-check-in instructions",
       GUEST_ACCESS_PASSCODE: "Guest access instructions",
       GUEST_APP_ACTIVATION: "Pin&Go Guest activation instructions",
+      GUEST_APP_DEVICE_VERIFICATION: "Pin&Go Guest device verification",
       CHECKOUT: "Check-out message",
     };
     const channels: Record<string, string> = { AIRBNB: "Airbnb", BOOKINGCOM: "Booking.com", BOOKING_COM: "Booking.com", EXPEDIA: "Expedia" };

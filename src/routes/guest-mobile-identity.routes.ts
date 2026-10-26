@@ -94,6 +94,9 @@ guestMobileIdentityRouter.post(
       });
     } catch (error) {
       const code = error instanceof Error ? error.message : "GUEST_MOBILE_EXCHANGE_FAILED";
+      if (code === "GUEST_MOBILE_ACTIVATION_REQUIRED") {
+        return res.status(403).json({ ok: false, error: "DEVICE_VERIFICATION_REQUIRED" });
+      }
       if (
         code === "GUEST_MOBILE_INVALID_STAY_TOKEN" ||
         code === "GUEST_MOBILE_STAY_NOT_AVAILABLE" ||

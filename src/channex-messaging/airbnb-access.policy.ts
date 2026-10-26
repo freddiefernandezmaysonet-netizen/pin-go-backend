@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type AirbnbCommunicationType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT";
+export type AirbnbCommunicationType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "GUEST_APP_DEVICE_VERIFICATION" | "CHECKOUT";
 
 export function guestAppActivationUrl(input: {
   guestToken?: string | null; guestTokenExpiresAt?: Date | null;
@@ -53,14 +53,20 @@ export function airbnbDeliveryId(input: AirbnbScope & {
 export function buildAirbnbAccessText(input: {
   type: AirbnbCommunicationType; propertyName: string; language: string | null;
   timezone: string; checkIn: Date; checkOut: Date;
-  code?: string; unlockKey?: string; address?: string | null; arrivalLocation?: string; guestAppUrl?: string;
+  code?: string; unlockKey?: string; address?: string | null; arrivalLocation?: string; guestAppUrl?: string; verificationCode?: string;
 }): string {
   const es = input.language?.toLowerCase().startsWith("es");
+  if (input.type === "GUEST_APP_DEVICE_VERIFICATION") {
+    if (!/^\d{6}$/.test(input.verificationCode ?? "")) throw Error("GUEST_APP_VERIFICATION_CODE_INVALID");
+    return es
+      ? `Pin&Go Guest · Verificación de dispositivo\nTu código de verificación: ${input.verificationCode}\nVálido por 10 minutos. Escríbelo en la página donde solicitaste vincular la app. No es el código de la puerta. No lo compartas con nadie, incluido el host. Si no solicitaste activar un dispositivo, ignora este mensaje; no se le ha dado acceso.`
+      : `Pin&Go Guest · Device verification\nYour verification code: ${input.verificationCode}\nValid for 10 minutes. Enter it on the page where you requested to link the app. This is not your door code. Do not share it with anyone, including your host. If you did not request to activate a device, ignore this message; access has not been granted.`;
+  }
   if (input.type === "GUEST_APP_ACTIVATION") {
     if (!input.guestAppUrl) throw new Error("GUEST_APP_LINK_UNAVAILABLE");
     return es
-      ? `Pin&Go Guest · ${input.propertyName}\nTu estadía, a tu alcance.\nAbre este enlace privado y toca “Abrir en Pin&Go Guest” para vincular tu reservación:\n${input.guestAppUrl}\nSi aún no tienes la app, instálala y vuelve a abrir este mismo enlace. También puedes continuar en el navegador. La app es opcional. No compartas este enlace.`
-      : `Pin&Go Guest · ${input.propertyName}\nYour stay, at your fingertips.\nOpen this private link and tap “Open in Pin&Go Guest” to link your reservation:\n${input.guestAppUrl}\nIf you have not installed the app, install it and open this same link again. You can also continue in your browser. The app is optional. Do not share this link.`;
+      ? `Pin&Go Guest · ${input.propertyName}\nTu estadía, a tu alcance.\nAbre este enlace privado para vincular tu reservación. Confirma tu dispositivo con el código de verificación que recibirás en esta conversación y luego toca “Abrir en Pin&Go Guest”:\n${input.guestAppUrl}\nSi aún no tienes la app, instálala y vuelve a abrir este mismo enlace. También puedes continuar en el navegador. La app es opcional. No compartas este enlace.`
+      : `Pin&Go Guest · ${input.propertyName}\nYour stay, at your fingertips.\nOpen this private link to link your reservation. Confirm your device with the verification code sent to this conversation, then tap “Open in Pin&Go Guest”:\n${input.guestAppUrl}\nIf you have not installed the app, install it and open this same link again. You can also continue in your browser. The app is optional. Do not share this link.`;
   }
   const format = new Intl.DateTimeFormat(es ? "es-PR" : "en-US", {
     timeZone: input.timezone, dateStyle: "medium", timeStyle: "short",

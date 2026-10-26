@@ -45,10 +45,15 @@ export async function deliverOtaOperationalCommunication(
     now?: Date;
     request?: InboxRequest;
     decrypt?: typeof decryptAccessCode;
+    activationVerification?: { challengeId: string; code: string };
   } = {},
 ): Promise<AirbnbDeliveryResult | null> {
   const env = options.env ?? process.env;
-  const pilot = await deliverAirbnbCommunication(prisma, reservationId, type, options);
+  const verification = type === "GUEST_APP_DEVICE_VERIFICATION" ? options.activationVerification : undefined;
+  if (type === "GUEST_APP_DEVICE_VERIFICATION" &&
+      (!verification || !/^[A-Za-z0-9_-]{32}$/.test(verification.challengeId) || !/^\d{6}$/.test(verification.code)))
+    return failure("OTA_OPERATIONAL_VERIFICATION_INVALID");
+  const pilot = verification ? null : await deliverAirbnbCommunication(prisma, reservationId, type, options);
   if (pilot) return pilot;
   if (!String(env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "").trim()) return null;
 
@@ -72,6 +77,9 @@ export async function deliverOtaOperationalCommunication(
     return failure("OTA_OPERATIONAL_CHECKOUT_NOT_DUE");
   if (type === "GUEST_ACCESS_PASSCODE" && now >= r.checkOut)
     return failure("OTA_OPERATIONAL_ACCESS_EXPIRED");
+  if (verification && (now >= r.checkOut || r.property.status !== "ACTIVE" ||
+      !r.guestTokenExpiresAt || r.guestTokenExpiresAt <= now || r.guestStayLink?.revokedAt))
+    return failure("OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
 
   const grants = r.accessGrants.filter(g =>
     g.type === "GUEST" && g.method === "PASSCODE_TIMEBOUND" &&
@@ -92,6 +100,7 @@ export async function deliverOtaOperationalCommunication(
     provider, type, r.checkIn.toISOString(), r.checkOut.toISOString(),
     type === "GUEST_ACCESS_PASSCODE" ? grant?.id : null,
     type === "GUEST_ACCESS_PASSCODE" ? grant?.secureAccessCode?.accessCodeHash : null,
+    ...(verification ? [verification.challengeId] : []),
   ])).digest("hex");
   const prior = await prisma.messageLog.findUnique({ where: { id: receiptId } });
   if (prior) return prior.status === "SENT"
@@ -168,6 +177,7 @@ export async function deliverOtaOperationalCommunication(
     const text = buildAirbnbAccessText({
       type, propertyName: r.property.name, language: r.preferredLanguage,
       ...(guestAppUrl ? { guestAppUrl } : {}),
+      ...(verification ? { verificationCode: verification.code } : {}),
       arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),
       timezone: r.property.timezone, checkIn: r.checkIn, checkOut: r.checkOut,
       address: r.property.address1,

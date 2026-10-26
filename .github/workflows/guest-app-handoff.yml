@@ -6,6 +6,9 @@ on:
       - "src/routes/guest-app*"
       - "src/routes/guest.routes.ts"
       - "src/guest-mobile/guest-mobile-session.service.ts"
+      - "src/guest-mobile/ota-guest-app-activation.service.ts"
+      - "prisma/schema.prisma"
+      - "prisma/migrations/20261026030000_ota_guest_app_activation/**"
       - "tsconfig.guest-app-handoff.json"
       - ".github/workflows/guest-app-handoff.yml"
 
@@ -45,5 +48,7 @@ jobs:
       - run: npx tsc -p tsconfig.guest-app-handoff.json --pretty false
       - name: Portal native-link contract, real database and session recovery
         run: npx tsx --test src/routes/guest-app.db.test.ts
+      - name: OTA activation security, copied links and concurrent redemption
+        run: npx tsx --test src/routes/guest-app-activation-security.db.test.ts
       - name: Existing email fallback and mobile authorization contracts
         run: npx tsx --test src/services/precheckin-email-fallback.contract.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts
