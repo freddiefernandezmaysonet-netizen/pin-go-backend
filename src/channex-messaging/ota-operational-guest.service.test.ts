@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { deliverOtaOperationalCommunication } from "./ota-operational-guest.service.js";
+import type { AirbnbCommunicationType } from "./airbnb-access.policy.js";
 
 const booking = "11111111-1111-4111-8111-111111111111";
 const remote = "22222222-2222-4222-8222-222222222222";
@@ -86,10 +87,11 @@ function fixture(source = "BookingCom") {
     if (input.path.endsWith(thread)) return { data: threadData };
     return { data: [threadData], meta: { page: 1, limit: 100, total: 1 } };
   };
-  const send = (type: "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT" = "GUEST_ACCESS_PASSCODE",
+  const send = (type: AirbnbCommunicationType = "GUEST_ACCESS_PASSCODE",
     providedEnv = env,
+    activationVerification?: { challengeId: string; code: string },
   ) => deliverOtaOperationalCommunication(prisma, "res", type, {
-    env: providedEnv, now, request, decrypt: () => "987654",
+    env: providedEnv, now, request, decrypt: () => "987654", ...(activationVerification ? { activationVerification } : {}),
   });
   return {
     reservation, threadData, receipts, prisma, send, sentTexts,
@@ -98,6 +100,31 @@ function fixture(source = "BookingCom") {
     set failSave(v: boolean) { failSave = v; },
   };
 }
+
+for (const source of ["Airbnb", "BookingCom"]) {
+  test(`${source}: device verification uses the verified booking thread, a challenge-scoped receipt and no logged code`, async () => {
+    const f = fixture(source);
+    const verification = { challengeId: "c".repeat(32), code: "123456" };
+    assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, true);
+    assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, true);
+    assert.equal(f.posts, 1);
+    assert.match(f.sentTexts[0]!, /123456/);
+    assert.match(f.sentTexts[0]!, /No es el código de la puerta/);
+    assert.doesNotMatch(f.sentTexts[0]!, /987654|guest\/app|pingo-guest:/);
+    assert.ok(!JSON.stringify([...f.receipts.values()]).includes("123456"));
+    assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, { ...verification, challengeId: "d".repeat(32) }))?.ok, true);
+    assert.equal(f.posts, 2);
+  });
+}
+test("uncertain device verification sends are not repeated and malformed verification cannot send", async () => {
+  const f = fixture(); f.failPost = true;
+  const verification = { challengeId: "c".repeat(32), code: "123456" };
+  assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, false);
+  assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, false);
+  assert.equal(f.posts, 1);
+  assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, { ...verification, code: "bad" }))?.ok, false);
+  assert.equal(f.posts, 1);
+});
 
 test("preflight identifies invalid thread metadata without exposing payloads", async () => {
   const f = fixture();

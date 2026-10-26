@@ -88,7 +88,7 @@ export function createAutoRepository(db: PrismaClient) {
           propertyId: scope.propertyId,
           to: scope.threadId,
           channel: "channex", provider: "channex", status: "SENT",
-          communicationType: { in: ["PRECHECKIN", "GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION", "CHECKOUT"] },
+          communicationType: { in: ["PRECHECKIN", "GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION", "GUEST_APP_DEVICE_VERIFICATION", "CHECKOUT"] },
           providerMessageId: { in: ids },
           OR: [
             { body: { contains: '"kind":"PIN_GO_AIRBNB_DELIVERY"' } },

@@ -54,7 +54,7 @@ test("trusted Channex operational receipts are owned by Pin&Go, not the host", a
     assert.deepEqual([...own], [operationId]);
     assert.equal(f.queries[0].to, threadId);
     assert.deepEqual(f.queries[0].communicationType.in, [
-      "PRECHECKIN", "GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION", "CHECKOUT",
+      "PRECHECKIN", "GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION", "GUEST_APP_DEVICE_VERIFICATION", "CHECKOUT",
     ]);
   }
 });

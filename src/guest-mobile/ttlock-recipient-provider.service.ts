@@ -56,7 +56,7 @@ export async function registerAndAuthenticateTTLockRecipient(
       // The old generated email-shaped name is invalid for cloud registration.
       // Normalize only our exact legacy format, never a registered account.
       const legacy = /^guest-([a-f0-9]{32})@[a-z0-9.-]+\.[a-z]{2,}$/i.exec(username);
-      if (legacy) {
+      if (legacy?.[1]) {
         if (identity.providerUid || identity.accessTokenCiphertext || identity.refreshTokenCiphertext) {
           throw new Error("TTLOCK_RECIPIENT_RECOVERY_REQUIRED");
         }

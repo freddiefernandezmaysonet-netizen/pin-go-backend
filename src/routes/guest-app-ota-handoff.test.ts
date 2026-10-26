@@ -6,13 +6,13 @@ import type { PrismaClient } from "@prisma/client";
 import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 import { buildGuestAppRouter } from "./guest-app.routes.js";
 
-test("OTA activation URL reaches the existing handoff with the same reservation token", async t => {
+test("copied OTA activation URL cannot reveal a native bearer or send a verification message on GET", async t => {
   const token = "synthetic_ota_stay_token_123456";
   const queries: any[] = [];
   const db = { reservation: { findFirst: async (query: any) => {
     queries.push(query);
-    return query.where.guestToken === token ? { preferredLanguage: "es" } : null;
-  } } } as unknown as Pick<PrismaClient, "reservation">;
+    return query.where.guestToken === token ? { preferredLanguage: "es", source: "AIRBNB", externalProvider: "CHANNEX", externalId: "booking-1" } : null;
+  } } } as unknown as PrismaClient;
   const app = express(); app.use(buildGuestAppRouter(db));
   const server = app.listen(0, "127.0.0.1");
   await new Promise<void>(resolve => server.once("listening", resolve));
@@ -25,9 +25,10 @@ test("OTA activation URL reaches the existing handoff with the same reservation 
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   const html = await response.text();
-  assert.ok(html.includes(`pingo-guest://stay/${token}`));
+  assert.doesNotMatch(html, /pingo-guest:/);
   assert.ok(html.includes(`/guest/verify/${token}`));
-  assert.match(html, /vuelve a abrir este mismo enlace/);
+  assert.match(html, /Enviar código de verificación/);
+  assert.match(response.headers.get("set-cookie")!, /__Host-pingo-guest-activation=.*Secure;.*SameSite=Strict/i);
   assert.doesNotMatch(html, /Guarda el correo/);
   assert.equal(queries[0].where.status, "ACTIVE");
   assert.equal(queries[0].where.property.status, "ACTIVE");

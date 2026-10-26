@@ -9,7 +9,7 @@ for (const [instant, enabled, expected] of [[start-1,true,false],[start,true,tru
   let linked = true, authenticated = true;
   const db = {
    guestDeviceSession: { findUnique: async () => authenticated ? { id:"device", guestPersonId:"guest", expiresAt:new Date("2026-11-01"), revokedAt:null } : null },
-   guestStayLink: { findFirst: async (q:any) => {
+   guestStayLink: { findMany: async () => [], findFirst: async (q:any) => {
     assert.equal(q.where.guestPersonId,"guest"); assert.equal(q.where.revokedAt,null);
     assert.equal(q.where.reservation.reservationNumber,"PG-TEST"); assert.equal(q.where.reservation.status,"ACTIVE");
     return linked ? { reservation:{ id:"reservation",propertyId:"property",guestToken:"private-stay-token",guestTokenExpiresAt:new Date("2026-11-01"),property:{organizationId:"org"} } } : null;
