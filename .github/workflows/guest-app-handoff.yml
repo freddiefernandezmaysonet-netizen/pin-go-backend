@@ -8,6 +8,7 @@ on:
       - "src/guest-mobile/guest-mobile-session.service.ts"
       - "src/guest-mobile/ota-guest-app-activation.service.ts"
       - "src/guest-mobile/guest-app-verification*"
+      - "src/middleware/guest-app-form-cors*"
       - "prisma/schema.prisma"
       - "prisma/migrations/20261026030000_ota_guest_app_activation/**"
       - "tsconfig.guest-app-handoff.json"
@@ -78,5 +79,7 @@ jobs:
         run: npx tsx --test src/routes/guest-app-activation-security.db.test.ts
       - name: Verification email transport and channel routing
         run: node --import tsx --test src/guest-mobile/guest-app-verification-delivery.test.ts
+      - name: Activation form CORS boundary and CSRF regression
+        run: node --import tsx --test src/middleware/guest-app-form-cors.test.ts
       - name: Existing email fallback and mobile authorization contracts
         run: npx tsx --test src/services/precheckin-email-fallback.contract.test.ts src/guest-mobile/guest-mobile-session.contract.test.ts src/guest-mobile/guest-mobile-http.contract.test.ts src/guest-mobile/guest-mobile-my-stay.contract.test.ts
