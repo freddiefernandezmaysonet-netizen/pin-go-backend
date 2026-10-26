@@ -29,8 +29,17 @@ test("access codes with disposable PostgreSQL and real Prisma relations", async 
   const person = await db.guestPerson.create({ data: { displayName: "Synthetic guest" } });
   const link = await db.guestStayLink.create({ data: { guestPersonId: person.id, reservationId: reservation.id } });
   const bearer = "synthetic_mobile_session_token_0001";
+  const activation = await db.guestAppActivationChallenge.create({ data: {
+    id: "synthetic_access_code_activation_1", reservationId: reservation.id,
+    guestTokenHash: createHash("sha256").update("synthetic_access_code_stay_token").digest("hex"),
+    browserHash: "synthetic-browser-hash", codeHash: "synthetic-code-hash", expiresAt: end,
+    verifiedAt: now, deliveredAt: now, consumedAt: now,
+  } });
+  await db.reservation.update({ where: { id: reservation.id }, data: {
+    guestToken: "synthetic_access_code_stay_token", guestTokenExpiresAt: end,
+  } });
   const session = await db.guestDeviceSession.create({ data: {
-    guestPersonId: person.id, tokenHash: createHash("sha256").update(bearer).digest("hex"), expiresAt: end,
+    guestPersonId: person.id, guestAppActivationId: activation.id, tokenHash: createHash("sha256").update(bearer).digest("hex"), expiresAt: end,
   } });
   const grant = await db.accessGrant.create({ data: {
     lockId: lock.id, reservationId: reservation.id, type: "GUEST", method: "PASSCODE_TIMEBOUND",

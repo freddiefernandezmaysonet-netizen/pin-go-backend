@@ -1,6 +1,7 @@
 import { runHybridFeeCycle } from "../pin-ai/hybrid-fee.service.js";
 import { createHybridFeeStripeProvider } from "../pin-ai/hybrid-fee-stripe.provider.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
+import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 // src/workers/reservation.worker.ts
 import dotenv from "dotenv";
 dotenv.config({ path: "./.env", override: true });
@@ -1494,6 +1495,7 @@ async function processCheckins(now: Date) {
               }
 
               return sendGuestAccessPasscodeEmail({
+                guestAppUrl: guestAppActivationUrl(reservation, new Date(), process.env),
                 arrivalLocation: formatPropertyArrivalLocation(reservation.property, guestLanguage),
                 to: String(
                   reservation.guestEmail ?? ""

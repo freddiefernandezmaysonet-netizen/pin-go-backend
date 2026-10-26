@@ -1,6 +1,7 @@
 import { isOtaGuestExternalDeliveryBlocked } from "../services/ota-guest-external-messaging.policy.js";
 import { buildGuestAccessSmsRetryBody } from "../services/guest-access-sms-retry-body.service.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
+import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 import { isChannexGuestRegistrationExempt } from "../services/guest-registration-channel.policy";
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import dotenv from "dotenv";
@@ -539,6 +540,7 @@ async function processGuestAccessEmailRetries() {
 
       const sent =
         await sendGuestAccessPasscodeEmail({
+          guestAppUrl: guestAppActivationUrl(grant.reservation, new Date(), process.env),
           arrivalLocation: formatPropertyArrivalLocation(grant.reservation.property, grant.reservation.preferredLanguage),
           to: guestEmail,
           replyTo: guestReplyTo.email,

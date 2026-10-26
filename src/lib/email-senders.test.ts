@@ -29,6 +29,7 @@ test("approved identities reach Resend independently of the legacy sender", asyn
       validFrom: new Date("2026-10-02T19:00:00Z"), validUntil: new Date("2026-10-03T15:00:00Z"),
       cancelledAt: new Date("2026-10-01T12:00:00Z"), propertyTimeZone: "America/Puerto_Rico",
       passcode: "123456", preferredLanguage: "es", currency: "USD", totalAmount: 100,
+      guestAppUrl: "https://api.pin-ngo.com/guest/app/synthetic_private_stay_token_1234",
       verificationUrl: "https://app.example.com/verify", reviewUrl: "https://app.example.com/review",
       manageReservationUrl: "https://app.example.com/manage", reservationDetailUrl: "https://app.example.com/reservation",
       dashboardUrl: "https://app.example.com/dashboard", idempotencyKey: "offline-sender-test",
@@ -65,6 +66,11 @@ test("approved identities reach Resend independently of the legacy sender", asyn
         assert.equal(requests.length, before + 2, "both attempts must reach the offline provider");
         assert.equal(requests[before]?.from, expectedFrom);
         assert.equal(requests[before + 1]?.from, expectedFrom);
+        if (name === "sendGuestAccessPasscodeEmail") {
+          const html = requests[before]?.html ?? "";
+          assert.ok(html.includes(fixture.guestAppUrl));
+          assert.match(html, /email de tu reservación/);
+        }
         if (["sendGuestAccessPasscodeEmail", "sendGuestPreCheckinEmail", "sendDirectBookingGuestConfirmation"].includes(name)) {
           assert.equal(requests[before]?.reply_to, "host@example.com");
           assert.equal(requests[before + 1]?.reply_to, "host@example.com");

@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { ACTIVATION_PREFIX, activationHash, activeAppStayWhere, lockAppStay } from "./ota-guest-app-activation.service.js";
-import { resolveChannexOperationalProvider } from "../services/ota-guest-external-messaging.policy.js";
+import { guestAppVerificationChannel } from "./guest-app-verification-channel.policy.js";
 
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -84,11 +84,10 @@ export async function exchangeGuestStayToken(
       throw new Error("GUEST_MOBILE_STAY_NOT_AVAILABLE");
     }
 
-    const ota = resolveChannexOperationalProvider(reservation);
-    if (ota && !activationId) throw Error("GUEST_MOBILE_ACTIVATION_REQUIRED");
-    if (activationId && (!ota || reservation.status !== "ACTIVE" || reservation.cancelledAt ||
+    if (!activationId) throw Error("GUEST_MOBILE_ACTIVATION_REQUIRED");
+    if (!guestAppVerificationChannel(reservation) || reservation.status !== "ACTIVE" || reservation.cancelledAt ||
         reservation.property.status !== "ACTIVE" || reservation.checkOut <= now ||
-        !reservation.guestTokenExpiresAt || reservation.guestTokenExpiresAt <= now))
+        !reservation.guestTokenExpiresAt || reservation.guestTokenExpiresAt <= now)
       throw Error("GUEST_MOBILE_STAY_NOT_AVAILABLE");
 
     let guestPersonId: string;
@@ -119,9 +118,7 @@ export async function exchangeGuestStayToken(
     }
 
     const bearer = makeBearer();
-    const expiresAt = new Date(ota
-      ? Math.min(now.getTime() + SESSION_TTL_MS, +reservation.checkOut, +reservation.guestTokenExpiresAt!)
-      : now.getTime() + SESSION_TTL_MS);
+    const expiresAt = new Date(Math.min(now.getTime() + SESSION_TTL_MS, +reservation.checkOut, +reservation.guestTokenExpiresAt!));
 
     const session = await tx.guestDeviceSession.create({
       data: {
@@ -178,13 +175,8 @@ export async function resolveGuestMobileSession(
         !await prisma.reservation.findFirst({ where: { id: proof.reservation.id, ...activeAppStayWhere(now) }, select: { id: true } }))
       throw Error("GUEST_MOBILE_UNAUTHENTICATED");
   } else {
-    // Legacy OTA sessions are not grandfathered into access after this fix.
-    const stays = await prisma.guestStayLink.findMany({
-      where: { guestPersonId: session.guestPersonId },
-      select: { reservation: { select: { source: true, externalProvider: true, externalId: true } } },
-    });
-    if (stays.some(stay => resolveChannexOperationalProvider(stay.reservation)))
-      throw Error("GUEST_MOBILE_UNAUTHENTICATED");
+    // A session originally created with just a copied stay link must reverify.
+    throw Error("GUEST_MOBILE_UNAUTHENTICATED");
   }
 
   return session;
