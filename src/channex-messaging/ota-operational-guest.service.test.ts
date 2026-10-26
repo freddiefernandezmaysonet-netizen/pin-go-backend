@@ -29,7 +29,8 @@ function fixture(source = "BookingCom") {
     accessGrants: [{
       id: "grant", type: "GUEST", method: "PASSCODE_TIMEBOUND", status: "ACTIVE",
       startsAt: checkIn, endsAt: checkOut, lastAppliedAt: now,
-      unlockKey: "#", secureAccessCode: { accessCodeHash: "hash", accessCodeEnc: "encrypted" },
+      unlockKey: "#", secureAccessCode: { accessCodeHash: "hash", accessCodeEnc: "encrypted",
+        startDate: BigInt(checkIn.getTime()), endDate: BigInt(checkOut.getTime()) },
     }],
   };
   const threadData: any = {
@@ -188,6 +189,18 @@ test("changed access code invalidates the send", async () => {
   f.prisma.reservation.findUnique = async () => {
     const r = structuredClone(f.reservation);
     if (++reads >= 2) r.accessGrants[0].secureAccessCode.accessCodeHash = "changed";
+    return r;
+  };
+  assert.equal((await f.send())?.error, "OTA_OPERATIONAL_RESERVATION_CHANGED");
+  assert.equal(f.posts, 0);
+});
+
+test("changed BigInt access validity blocks dispatch without rounding", async () => {
+  const f = fixture();
+  let reads = 0;
+  f.prisma.reservation.findUnique = async () => {
+    const r = structuredClone(f.reservation);
+    if (++reads >= 2) r.accessGrants[0].secureAccessCode.endDate += 1n;
     return r;
   };
   assert.equal((await f.send())?.error, "OTA_OPERATIONAL_RESERVATION_CHANGED");

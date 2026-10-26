@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { decryptAccessCode } from "../services/access-code-crypto.service.js";
@@ -151,7 +152,7 @@ export async function deliverOtaOperationalCommunication(
     const current = await prisma.reservation.findUnique({
       where: { id: reservationId }, include: reservationInclude,
     });
-    if (!current || JSON.stringify(current) !== JSON.stringify(r))
+    if (!current || !isDeepStrictEqual(current, r))
       return failure("OTA_OPERATIONAL_RESERVATION_CHANGED");
 
     stage = "ACCESS_DECRYPT";
