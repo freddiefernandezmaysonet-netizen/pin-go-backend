@@ -36,14 +36,35 @@ jobs:
     env:
       DATABASE_URL: postgresql://guest_app_ci:guest_app_ci@127.0.0.1:5432/guest_app_ci
       GUEST_APP_DB_TEST: "true"
+      HANDOFF_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci --ignore-scripts
       - run: npx prisma generate
       - run: npx prisma validate
+      - name: Apply activation migration to a populated previous schema
+        run: |
+          git show "$HANDOFF_BASE_SHA:prisma/schema.prisma" > "$RUNNER_TEMP/guest-app-base.prisma"
+          npx prisma db push --schema "$RUNNER_TEMP/guest-app-base.prisma" --skip-generate
+          npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL'
+          INSERT INTO "GuestPerson" ("id", "updatedAt") VALUES ('activation-migration-person', NOW());
+          INSERT INTO "GuestDeviceSession" ("id", "guestPersonId", "tokenHash", "expiresAt", "updatedAt")
+          VALUES ('activation-migration-session', 'activation-migration-person', 'synthetic-migration-token-hash', NOW() + INTERVAL '1 day', NOW());
+          SQL
+          npx prisma db execute --url "$DATABASE_URL" --file prisma/migrations/20261026030000_ota_guest_app_activation/migration.sql
+          npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+          npx prisma db execute --url "$DATABASE_URL" --stdin <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM "GuestDeviceSession" WHERE "id" = 'activation-migration-session'
+              AND "tokenHash" = 'synthetic-migration-token-hash' AND "guestAppActivationId" IS NULL)
+            THEN RAISE EXCEPTION 'Existing device session changed'; END IF;
+          END $$;
+          SQL
       - run: npx prisma db push --skip-generate
       - run: npx tsc -p tsconfig.guest-app-handoff.json --pretty false
       - name: Portal native-link contract, real database and session recovery

@@ -91,7 +91,7 @@ function fixture(source = "BookingCom") {
     providedEnv = env,
     activationVerification?: { challengeId: string; code: string },
   ) => deliverOtaOperationalCommunication(prisma, "res", type, {
-    env: providedEnv, now, request, decrypt: () => "987654", activationVerification,
+    env: providedEnv, now, request, decrypt: () => "987654", ...(activationVerification ? { activationVerification } : {}),
   });
   return {
     reservation, threadData, receipts, prisma, send, sentTexts,
@@ -108,9 +108,9 @@ for (const source of ["Airbnb", "BookingCom"]) {
     assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, true);
     assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, verification))?.ok, true);
     assert.equal(f.posts, 1);
-    assert.match(f.sentTexts[0], /123456/);
-    assert.match(f.sentTexts[0], /No es el código de la puerta/);
-    assert.doesNotMatch(f.sentTexts[0], /987654|guest\/app|pingo-guest:/);
+    assert.match(f.sentTexts[0]!, /123456/);
+    assert.match(f.sentTexts[0]!, /No es el código de la puerta/);
+    assert.doesNotMatch(f.sentTexts[0]!, /987654|guest\/app|pingo-guest:/);
     assert.ok(!JSON.stringify([...f.receipts.values()]).includes("123456"));
     assert.equal((await f.send("GUEST_APP_DEVICE_VERIFICATION", env, { ...verification, challengeId: "d".repeat(32) }))?.ok, true);
     assert.equal(f.posts, 2);

@@ -104,7 +104,8 @@ guestMobileIdentityRouter.post(
       ) {
         return res.status(404).json({ ok: false, error: "STAY_NOT_AVAILABLE" });
       }
-      console.error("[GUEST_MOBILE_SESSION_EXCHANGE] failed", { code });
+      // Prisma/provider exception text can contain request arguments or tokens.
+      console.error("[GUEST_MOBILE_SESSION_EXCHANGE] failed", { code: "GUEST_MOBILE_EXCHANGE_FAILED" });
       return res.status(500).json({ ok: false, error: "GUEST_MOBILE_EXCHANGE_FAILED" });
     }
   },
