@@ -4,10 +4,10 @@ import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection
 import { decryptAccessCode } from "../services/access-code-crypto.service.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
 import { createHostInbox, createInboxHttpRequest, validId, type InboxRequest, type Thread } from "./host-inbox.js";
-import { airbnbDeliveryId, buildAirbnbAccessText, ownsAirbnbCommunication, type AirbnbCommunicationType } from "./airbnb-access.policy.js";
+import { airbnbDeliveryId, buildAirbnbAccessText, guestAppActivationUrl, ownsAirbnbCommunication, type AirbnbCommunicationType } from "./airbnb-access.policy.js";
 
 export type AirbnbDeliveryResult = { ok: boolean; status: "SENT" | "FAILED"; error?: string; replayed?: boolean; skipped?: boolean };
-const reservationInclude = { property: true, accessGrants: { include: { secureAccessCode: true } } } as const;
+const reservationInclude = { property: true, guestStayLink: { select: { revokedAt: true } }, accessGrants: { include: { secureAccessCode: true } } } as const;
 
 export async function airbnbOwnsReservation(prisma: PrismaClient, reservationId: string, env = process.env) {
   if (env.CHANNEX_AIRBNB_ACCESS_ENABLED !== "true") return false;
@@ -42,6 +42,9 @@ export async function deliverAirbnbCommunication(
   const receiptId = airbnbDeliveryId({ ...scope, type, accessGrantId: grant?.id ?? null, accessCodeHash: grant?.secureAccessCode?.accessCodeHash ?? null });
   const prior = await prisma.messageLog.findUnique({ where: { id: receiptId } });
   if (prior) return prior.status === "SENT" ? { ok: true, status: "SENT", replayed: true } : fail("AIRBNB_SEND_OUTCOME_UNKNOWN");
+  const guestAppUrl = type === "GUEST_APP_ACTIVATION" ? guestAppActivationUrl(r, now, env) : null;
+  if (type === "GUEST_APP_ACTIVATION" && (!guestAppUrl || r.guestAccessReleaseStatus !== "RELEASED" || now >= r.checkOut))
+    return fail("OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
   const config = resolveOtaConnectionCenterConfig(env);
   if (!config.enabled && !options.request) return fail("AIRBNB_TRANSPORT_DISABLED");
   const request = options.request ?? (config.enabled ? createInboxHttpRequest({ apiOrigin: config.provider.apiOrigin, apiKey: config.provider.apiKey }) : null);
@@ -74,7 +77,7 @@ export async function deliverAirbnbCommunication(
     // Compare current scope and credential evidence immediately before the durable send fence.
     if (!current || !isDeepStrictEqual(current, r)) return fail("AIRBNB_RESERVATION_CHANGED");
     const code = grant?.secureAccessCode?.accessCodeEnc ? (options.decrypt ?? decryptAccessCode)(grant.secureAccessCode.accessCodeEnc) : undefined;
-    const text = buildAirbnbAccessText({ type, propertyName: r.property.name, language: r.preferredLanguage,
+    const text = buildAirbnbAccessText({ ...(guestAppUrl ? { guestAppUrl } : {}), type, propertyName: r.property.name, language: r.preferredLanguage,
       arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),
       timezone: r.property.timezone, checkIn: r.checkIn, checkOut: r.checkOut, address: r.property.address1,
       ...(code ? { code, unlockKey: grant?.unlockKey ?? "#" } : {}),

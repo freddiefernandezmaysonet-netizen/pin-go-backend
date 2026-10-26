@@ -20,6 +20,7 @@ function fixture(source = "BookingCom") {
   const reservation: any = {
     id: "res", propertyId: "prop", source, externalProvider: "CHANNEX", externalId: booking,
     guestEmail: null, guestPhone: null, preferredLanguage: "es",
+    guestToken: "private_test_stay_token_123456", guestTokenExpiresAt: checkOut, guestStayLink: null,
     checkIn, checkOut, status: "ACTIVE", paymentState: "PAID", cancelledAt: null,
     guestAccessReleaseStatus: "RELEASED", guestAccessReleasedAt: now,
     property: {
@@ -41,6 +42,7 @@ function fixture(source = "BookingCom") {
     },
     relationships: { property: rel("property", remote), booking: rel("booking", booking) },
   };
+  const sentTexts: string[] = [];
   let posts = 0, failPost = false, failSave = false;
   const receipts = new Map<string, any>();
   const prisma: any = {
@@ -69,6 +71,7 @@ function fixture(source = "BookingCom") {
   const request: any = async (input: any) => {
     if (input.method === "POST") {
       posts++;
+      sentTexts.push(input.body.message.message);
       if (failPost) throw Error("private provider failure");
       return {
         data: {
@@ -83,13 +86,13 @@ function fixture(source = "BookingCom") {
     if (input.path.endsWith(thread)) return { data: threadData };
     return { data: [threadData], meta: { page: 1, limit: 100, total: 1 } };
   };
-  const send = (type: "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "CHECKOUT" = "GUEST_ACCESS_PASSCODE",
+  const send = (type: "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT" = "GUEST_ACCESS_PASSCODE",
     providedEnv = env,
   ) => deliverOtaOperationalCommunication(prisma, "res", type, {
     env: providedEnv, now, request, decrypt: () => "987654",
   });
   return {
-    reservation, threadData, receipts, prisma, send,
+    reservation, threadData, receipts, prisma, send, sentTexts,
     get posts() { return posts; },
     set failPost(v: boolean) { failPost = v; },
     set failSave(v: boolean) { failSave = v; },
@@ -205,4 +208,35 @@ test("changed BigInt access validity blocks dispatch without rounding", async ()
   };
   assert.equal((await f.send())?.error, "OTA_OPERATIONAL_RESERVATION_CHANGED");
   assert.equal(f.posts, 0);
+});
+
+for (const source of ["BookingCom", "Airbnb"]) {
+  test(source + " activation uses existing token once after an already-sent access message", async () => {
+    const f = fixture(source);
+    assert.equal((await f.send())?.ok, true);
+    assert.equal((await f.send("GUEST_APP_ACTIVATION"))?.ok, true);
+    assert.equal((await f.send("GUEST_APP_ACTIVATION"))?.replayed, true);
+    assert.equal(f.posts, 2);
+    assert.equal(f.sentTexts.filter(text => text.includes("987654")).length, 1);
+    assert.ok(f.sentTexts[1]!.includes("https://api.pin-ngo.com/guest/app/private_test_stay_token_123456"));
+    assert.match(f.sentTexts[1]!, /vuelve a abrir/);
+    assert.doesNotMatch(JSON.stringify([...f.receipts.values()]), /private_test_stay_token|987654/);
+  });
+}
+for (const state of ["missing", "expired", "revoked"] as const) {
+  test(state + " stay token blocks activation but preserves access delivery", async () => {
+    const f = fixture();
+    if (state === "missing") f.reservation.guestToken = null;
+    if (state === "expired") f.reservation.guestTokenExpiresAt = now;
+    if (state === "revoked") f.reservation.guestStayLink = { revokedAt: now };
+    assert.equal((await f.send())?.ok, true);
+    assert.equal((await f.send("GUEST_APP_ACTIVATION"))?.error, "OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
+    assert.equal(f.posts, 1);
+  });
+}
+test("activation timeout never repeats the provider POST", async () => {
+  const f = fixture(); f.failPost = true;
+  assert.equal((await f.send("GUEST_APP_ACTIVATION"))?.error, "OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN");
+  await f.send("GUEST_APP_ACTIVATION");
+  assert.equal(f.posts, 1);
 });
