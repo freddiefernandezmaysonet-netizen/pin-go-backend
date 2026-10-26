@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import express from "express";
+import express, { type RequestHandler } from "express";
+import { createRequire } from "node:module";
+import { withGuestAppFormCors } from "../middleware/guest-app-form-cors.js";
 import { PrismaClient } from "@prisma/client";
 import type { AddressInfo } from "node:net";
 import { randomBytes } from "node:crypto";
 import { buildGuestAppRouter } from "./guest-app.routes.js";
 import { exchangeGuestStayToken, resolveGuestMobileSession } from "../guest-mobile/guest-mobile-session.service.js";
 import { activationHash, requestOtaGuestAppActivation, verifyOtaGuestAppActivation } from "../guest-mobile/ota-guest-app-activation.service.js";
+const cors = createRequire(import.meta.url)("cors") as (options: {
+  origin: (origin: string | undefined, callback: (error: Error | null, allowed?: boolean) => void) => void;
+}) => RequestHandler;
 
 test("OTA activation security with real PostgreSQL and HTTP", async t => {
   const testUrl = "postgresql://guest_app_ci:guest_app_ci@127.0.0.1:5432/guest_app_ci";
@@ -134,7 +139,11 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
 
   await t.test("HTTP requires explicit CSRF-protected confirmation; no native token is exposed before proof", async () => {
     const r = await stay(); let sentCode = "", sends = 0;
-    const app = express(); app.use(express.urlencoded({ extended: false }));
+    const app = express();
+    app.use(withGuestAppFormCors(cors({ origin(origin, callback) {
+      callback(origin ? Error("Synthetic CORS rejection") : null, !origin);
+    } })));
+    app.use(express.urlencoded({ extended: false }));
     app.use(buildGuestAppRouter(db, { deliverVerification: async input => { sends++; sentCode = input.code; return true; } }));
     const server = app.listen(0, "127.0.0.1"); await new Promise<void>(resolve => server.once("listening", resolve));
     t.after(() => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }));
@@ -144,10 +153,14 @@ test("OTA activation security with real PostgreSQL and HTTP", async t => {
     const cookie = initial.headers.get("set-cookie")!.split(";")[0];
     const csrf = html.match(/name="csrf" value="([^"]+)"/)![1];
     const post = (action: string, body: Record<string, string>, withCookie = true) => fetch(`${url}/${action}`, {
-      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(withCookie ? { cookie } : {}) }, body: new URLSearchParams(body),
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", Origin: "null", "sec-fetch-mode": "navigate", ...(withCookie ? { cookie } : {}) }, body: new URLSearchParams(body),
     });
     assert.equal((await post("request", { csrf }, false)).status, 403);
     assert.equal((await post("request", { csrf: "wrong" })).status, 403); assert.equal(sends, 0);
+    const crossSite = await fetch(`${url}/request`, { method: "POST", headers: {
+      "content-type": "application/x-www-form-urlencoded", Origin: "null", "sec-fetch-site": "cross-site", cookie,
+    }, body: new URLSearchParams({ csrf }) });
+    assert.equal(crossSite.status, 403); assert.equal(sends, 0);
     const pending = await post("request", { csrf }); assert.equal(pending.status, 200); assert.equal(sends, 1);
     const pendingHtml = await pending.text(); assert.doesNotMatch(pendingHtml, /pingo-guest:/);
     assert.ok(!pendingHtml.includes(sentCode));
