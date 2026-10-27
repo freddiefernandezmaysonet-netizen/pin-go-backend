@@ -204,7 +204,59 @@ Código revisado: backend main `af10a9d9191480d6b5b65f902abeb41859ece21a`.
 - `src/services/nfc.service.ts`: el inventario actual de tarjetas se organiza por propiedad y por etiquetas de huésped/limpieza. La tarjeta personal Prime requiere una asociación adicional con el miembro y permisos por reserva.
 - `PrimeNotifyState` en Prisma es un estado de notificaciones por organización; no representa esta membresía.
 
-## Experiencia inicial
+## Dashboard del miembro: propuesta de pantallas
+
+Esta sección propone la organización del dashboard a partir de las reglas confirmadas. La navegación, los textos y la presentación siguen sujetos a revisión del fundador; no representan pantallas comerciales implementadas. Ambos planes ofrecen los mismos beneficios y usan el mismo dashboard.
+
+### Navegación y pantalla de inicio
+
+Cuatro secciones principales, con navegación inferior en móvil y lateral en escritorio. La experiencia se presenta en español o inglés según la elección del miembro.
+
+| Sección | Qué encuentra el miembro | Acción principal |
+| --- | --- | --- |
+| Inicio · Pin AI | Conversación para preparar un viaje, criterios de búsqueda visibles y resultados de propiedades participantes. Si existe una próxima reserva confirmada, un resumen con fechas y acceso a sus detalles. | «Planear mi viaje» o continuar una búsqueda guardada. |
+| Mis viajes | Próximas reservas, historial y planes de viaje guardados, identificados por separado. | Ver una reserva o retomar un plan. |
+| Mi tarjeta | Estado del envío, tarjeta asociada y estado de acceso para cada estancia. | Consultar entrega, ver el horario de acceso o reportar extravío. |
+| Mi cuenta | Perfil, dirección, idioma, plan mensual/anual, vigencia, pagos y gestión de renovación. | Actualizar datos o gestionar la membresía. |
+
+Inicio da prioridad a «Cuéntale a Pin AI cómo quieres tus próximas vacaciones». Ejemplo de texto orientativo, sin representar inventario disponible: «Quiero ir a Puerto Rico con mi pareja, del 6 al 9 de noviembre, cerca de la playa, con piscina privada y hasta USD 800 en total».
+
+La conversación permite expresar todos los requisitos juntos y continuar con cambios naturales. Pin AI pregunta solo por lo que falte o resulte ambiguo, conserva los requisitos durante la conversación y explica por qué encaja cada resultado. Los criterios editables acompañan la conversación. «Cerca de la playa» requiere concretar distancia o forma de desplazamiento cuando sea necesario; piscina privada y piscina compartida se distinguen según evidencia de la propiedad.
+
+Cada resultado muestra el descuento de esa propiedad sobre las noches, el total de la estancia con su desglose y las condiciones de sus beneficios. Para un miembro vigente, el importe de reservar no incluye otra compra de Prime. Si no hay resultados compatibles, se explica qué requisito limita la búsqueda y se ofrecen cambios que el miembro puede elegir. No se presenta una alternativa como coincidencia completa si incumple un requisito obligatorio.
+
+### Mis viajes
+
+- **Próximas e historial:** reservas vinculadas a la identidad verificada del miembro. Mostrar propiedad, fechas en la zona horaria del alojamiento, estado real, importe y beneficios acordados, con enlace al portal de esa reserva.
+- **Planes guardados:** conservar por elección del miembro la búsqueda y sus preferencias. Etiqueta visible: «Plan guardado · sin reserva». Al retomarlo, volver a comprobar disponibilidad y precio.
+- **Gestión de estancia:** permitir llegar a las funciones existentes del portal mediante acceso verificado. Pin AI para planificar viajes y la asistencia durante una estancia deben respetar sus respectivos alcances y ventanas de servicio.
+- **Después de cancelar Prime:** conservar las reservas confirmadas, su precio y el acceso correspondiente, según la regla comercial acordada. La pantalla diferencia el estado de la membresía del estado de cada viaje.
+
+### Mi tarjeta
+
+Presentación propuesta en dos bloques: «Tu tarjeta» para entrega y asociación, y «Acceso en tus viajes» para permisos de cada reservación. La primera tarjeta y su envío aparecen como incluidos; el reemplazo por extravío muestra USD 5 antes de cualquier pago.
+
+El envío muestra únicamente estados respaldados por el proceso real, por ejemplo «En preparación» o «Enviada», y seguimiento si existe. La tarjeta asignada no se presenta como acceso habilitado a todas las propiedades. Cada estancia indica compatibilidad confirmada, horario autorizado y estado real del permiso: programado, confirmado, pendiente de resolución o finalizado, según corresponda. No se muestra «Acceso listo» mientras falte confirmación del sistema de acceso.
+
+«Reportar extravío» y «Solicitar reemplazo · USD 5» son acciones propuestas distintas: el reporte debe permitir iniciar la protección de la tarjeta anterior sin depender de comprar otra. La revocación pendiente se muestra como pendiente hasta tener confirmación. La secuencia de bloqueo, reposición y atención de una estancia en curso sigue pendiente de definición; esta propuesta no la activa ni promete un acceso alternativo aún no validado.
+
+### Mi cuenta y estados del dashboard
+
+Mostrar el plan elegido con su importe y período completos: USD 9.99 al mes o USD 89.99 al año. Mostrar próxima renovación cuando corresponda, o «Beneficios disponibles hasta [fecha]» si la renovación fue cancelada. Incluir recibos, actualización del medio de pago y cancelación de la renovación cuando se implemente el recorrido de suscripción. El cambio entre planes requiere resolver las reglas pendientes antes de habilitar ese control.
+
+Perfil incluye los datos del registro inicial y la dirección de envío. Actualizar la dirección del perfil no debe prometer que se redirige una tarjeta ya despachada; el tratamiento logístico se definirá con el proceso de envío. Idioma y preferencias de viaje se pueden completar después del alta.
+
+| Situación | Presentación propuesta |
+| --- | --- |
+| Miembro nuevo, sin viajes | Bienvenida y conversación con Pin AI; estado real de preparación de la tarjeta, sin reservas ni beneficios consumidos ficticios. |
+| Reserva confirmada próxima | Resumen de la estancia y enlace a sus detalles; acceso físico con sus propias condiciones y horario. |
+| Renovación cancelada, período pagado vigente | Beneficios disponibles y fecha de finalización; permitir las operaciones válidas durante ese período. |
+| Membresía vencida | Acceso a cuenta, recibos y viajes existentes; invitación a reactivar para obtener beneficios en nuevas reservas. |
+| Error al consultar precio, reserva o acceso | Explicar qué dato no se pudo confirmar y permitir reintentar; conservar los criterios y la información introducida. |
+
+Los descuentos de una reserva se muestran a partir del desglose confirmado. La validación futura de estas pantallas debe cubrir móvil y escritorio, ambos idiomas y los estados anteriores.
+
+## Experiencia inicial de búsqueda
 
 Inicio del dashboard: «¿Dónde quieres ir? Cuéntaselo a Pin AI».
 
