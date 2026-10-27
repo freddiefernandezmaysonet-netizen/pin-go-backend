@@ -3,6 +3,7 @@ import { fromZonedTime } from 'date-fns-tz';
 import { checkPropertyAvailability } from '../src/services/availability.service.js';
 import { calculateDirectBookingPricing } from '../src/services/direct-booking-pricing.service.js';
 import { DEMO_PROPERTY_ID, type CatalogProperty, type Criteria } from './search.js';
+import { listingFacts } from './property-facts.js';
 
 const prisma = new PrismaClient();
 async function source() {
@@ -11,9 +12,13 @@ async function source() {
     city: true, region: true, country: true, maxGuests: true, minimumNights: true, maximumNights: true,
     checkInTime: true, checkOutTime: true, timezone: true,
     listingDetails: { select: { childrenPolicy: true, infantsPolicy: true, adultsOnly: true, petsPolicy: true,
-      minimumPrimaryBookingGuestAge: true, parkingAvailability: true, stepFreeEntrance: true, stepFreeBedroomAccess: true,
+      accommodationType: true, propertyType: true, bedroomCount: true, fullBathroomCount: true, halfBathroomCount: true,
+      sleepingAreas: { select: { beds: { select: { type: true, quantity: true } } } },
+      minimumPrimaryBookingGuestAge: true, parkingAvailability: true, parkingFeeType: true, stepFreeEntrance: true, stepFreeBedroomAccess: true,
       stepFreeBathroomAccess: true, features: { where: { isActive: true }, select: { type: true } }, sharedSpaces: { select: { type: true } } } },
-    amenities: { where: { isActive: true, chargeMode: { in: ['INCLUDED', 'REQUIRED'] } }, select: { name: true } },
+    amenities: { where: { isActive: true, chargeMode: { in: ['INCLUDED', 'REQUIRED'] } }, select: { name: true, isActive: true, chargeMode: true } },
+    nearbyPlaces: { where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], take: 5,
+      select: { name: true, nameEs: true, category: true, distanceText: true, travelTimeMinutes: true, isActive: true } },
     locks: { where: { ttlockLockId: 29944630, isActive: true }, select: { id: true } },
   } });
 }
@@ -28,20 +33,12 @@ function photos(value: unknown): string[] {
 export async function catalog(): Promise<CatalogProperty[]> {
   const p = await source(); if (!p) return [];
   const details = p.listingDetails;
-  const amenities = p.amenities.map(a => a.name.toLowerCase().trim());
-  const features: string[] = [];
-  if (amenities.some(a => ['pool', 'piscina', 'private pool', 'piscina privada'].includes(a)) || details?.sharedSpaces.some(s => s.type === 'POOL')) features.push('pool');
-  if (amenities.some(a => ['private pool', 'piscina privada'].includes(a))) features.push('private_pool');
-  if (amenities.some(a => ['wifi', 'wi-fi', 'internet'].includes(a))) features.push('wifi');
-  if (details?.parkingAvailability === 'YES') features.push('parking');
-  if (details?.features.some(f => f.type === 'BEACH_ACCESS')) features.push('beach_access');
-  if (details?.petsPolicy === 'ALLOWED') features.push('pets_allowed');
-  if ([details?.stepFreeEntrance, details?.stepFreeBedroomAccess, details?.stepFreeBathroomAccess].every(x => x === 'YES')) features.push('step_free');
+  const facts = listingFacts(details, p.amenities, p.nearbyPlaces);
   return [{ id: p.id, isTestProperty: p.isTestProperty, status: p.status, name: p.publicTitle || p.name,
     location: [p.city, p.region, p.country].filter(Boolean).join(', '),
     destinationTerms: [p.city, p.region, p.country, p.name, 'Demo', 'Puerto Rico', 'PR'].filter((x): x is string => !!x),
     maxGuests: p.maxGuests, minimumNights: p.minimumNights, maximumNights: p.maximumNights,
-    photos: photos(p.publicPhotos), features,
+    photos: photos(p.publicPhotos), ...facts,
     childrenAllowed: details?.childrenPolicy === 'ALLOWED' && details?.adultsOnly !== 'YES',
     infantsAllowed: details?.infantsPolicy === 'ALLOWED' && details?.adultsOnly !== 'YES',
     minimumAge: details?.minimumPrimaryBookingGuestAge ?? null,

@@ -1,7 +1,7 @@
 # Pin&Go Prime — dashboard de miembros y búsqueda con Pin AI
 
 Fecha: 27 de octubre de 2026, America/Puerto_Rico.
-Estado: diseño de producto y contrato inicial; buscador Prime pendiente de implementación.
+Estado: piloto privado de búsqueda conversacional implementado y desplegado para Demo; membresía comercial, cuentas permanentes y afiliación de anfitriones pendientes.
 
 ## Decisiones del fundador
 
@@ -94,4 +94,4 @@ Pin AI interpreta y explica. Las funciones del servidor deciden elegibilidad, di
 - No se emite un acceso NFC desde la búsqueda; una reserva elegible inicia el permiso con las fechas correctas.
 - Modificaciones, cancelación y pérdida de tarjeta se reflejan en el permiso con estado real del proveedor; una revocación pendiente no se muestra como completada.
 
-Este documento registra el diseño acordado y las propuestas de implementación. No modifica servicios en producción.
+Este documento registra el diseño acordado. El piloto aislado usa conversación contextual, disponibilidad y cotización de Demo en modo de solo lectura; su evidencia de verificación está en `prime-pilot/VERIFICATION.md`. El resto de las capacidades propuestas no debe interpretarse como implementado.

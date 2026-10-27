@@ -11,6 +11,8 @@ Isolated member dashboard with conversational Pin AI, progressive follow-up ques
 - Child/infant permission and unknown capacity fail closed. Supported features must come from structured listing evidence or exact amenity names; optional paid amenities are not inferred as included.
 - OpenAI extracts typed criteria and composes a reply from the server’s checked results and allowlisted property facts. The server alone validates requirements, selects the catalog, and checks availability/prices. The model cannot execute tools, select property IDs, write SQL, make reservations, or grant access. Unconfirmed features remain requirements until the traveler explicitly changes them.
 - Criteria can be searched without AI through the editable filters. Relative dates use Puerto Rico's date; max stay is 60 nights. Only USD total budgets are supported.
+- Public listing evidence now covers 19 feature requirements, minimum bedrooms/full bathrooms, bed breakdown, pool privacy, shared spaces, parking fee status and up to five active nearby places. Details are selected from the existing Demo listing; no schema changes or listing writes occur. Optional paid amenities do not become included requirements. Ocean view, waterfront and beach access are independent facts.
+- Nearby distances and times are explicitly host-reported. Travel mode is not stored in the existing schema, so a host-reported five-minute trip cannot satisfy a five-minute walking requirement. Those proximity requests remain unverified, rather than becoming matches.
 - NFC status records the completed physical Demo test. It does not assert current gateway health or active member access.
 
 ## Runtime and secret handling
@@ -30,7 +32,7 @@ Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Gi
 ## Validation
 
 ```
-node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts
+node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts prime-pilot/property-facts.test.ts
 npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --esModuleInterop prime-pilot/search.ts prime-pilot/catalog.ts prime-pilot/app.ts prime-pilot/server.ts
 npm ci --prefix prime-pilot
 npm run typecheck --prefix prime-pilot

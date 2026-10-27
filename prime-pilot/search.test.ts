@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { criteriaSchema, DEMO_PROPERTY_ID, emptyCriteria, matches, searchCatalog, validateStay, type CatalogProperty } from './search.js';
+import { listingFacts } from './property-facts.js';
 const criteria = { ...emptyCriteria, destination: 'Puerto Rico', checkIn: '2026-11-06', checkOut: '2026-11-09', adults: 2 };
 const property: CatalogProperty = { id: DEMO_PROPERTY_ID, isTestProperty: true, status: 'ACTIVE', name: 'Demo', location: 'PR', destinationTerms: ['Puerto Rico'], maxGuests: 4, minimumNights: 1, maximumNights: 30, photos: [], features: ['wifi'], childrenAllowed: false, infantsAllowed: false, nfcVerified: true, minimumAge: 21 };
 const quote = { currency: 'usd', nights: 3, nightlySubtotal: 300, cleaningFee: 40, amenitiesTotal: 10, taxesTotal: 35, totalAmount: 385, totalAmountCents: 38500 };
@@ -51,4 +52,16 @@ test('no-match diagnostics distinguish unverified preferences, unavailable dates
   assert.equal(budget.diagnostics.overBudget, 1); assert.equal(budget.diagnostics.unavailable, 0);
   const unavailable = await searchCatalog(criteria, { ...deps, available: async () => false });
   assert.equal(unavailable.diagnostics.unavailable, 1); assert.equal(unavailable.diagnostics.overBudget, 0);
+});
+test('bedroom and full-bathroom requirements reject missing evidence and insufficient counts', () => {
+  const required = { ...criteria, minBedrooms: 2, minFullBathrooms: 2, preferences: ['ocean_view'] as typeof criteria.preferences };
+  const p = { ...property, ...listingFacts({ bedroomCount: 2, fullBathroomCount: 2, features: [{ type: 'OCEAN_VIEW' }] }, []) };
+  assert.equal(matches(p, required), true);
+  assert.equal(matches({ ...p, details: undefined }, required), false);
+  assert.equal(matches({ ...p, details: { ...p.details, fullBathrooms: 1, halfBathrooms: 2 } }, required), false);
+  assert.equal(matches({ ...p, details: { ...p.details, bedrooms: 1, beds: [{ type: 'QUEEN', quantity: 4 }] } }, required), false);
+  assert.equal(matches(p, { ...required, unsupported: ['a cinco minutos caminando de la playa'] }), false);
+  assert.equal(criteriaSchema.safeParse({ ...criteria, minBedrooms: -1 }).success, false);
+  const oldClient = { ...criteria } as Partial<typeof criteria>; delete oldClient.minBedrooms; delete oldClient.minFullBathrooms;
+  assert.equal(criteriaSchema.parse(oldClient).minBedrooms, null);
 });

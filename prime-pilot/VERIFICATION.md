@@ -36,3 +36,12 @@ Production `OPENAI_API_KEY`, public booking settings, production API routes, wor
 - Runtime commit `1ee673ea7d84c61ac5a1bae0c03f96c5b66726f6` deployed successfully to the isolated pilot (deployment `cc538a49-a8ba-4348-aa3c-cdfdc193ad84`). Startup again confirmed the database is read-only. The public client serves the new conversational bundle; unauthenticated member access still returns 401.
 - Authenticated live three-turn conversation passed with generated replies (no narration fallback): (1) Puerto Rico for two adults asked only for dates; (2) a short reply with November 6–9 and USD 500 returned the Demo quote of USD 6.69, keeping the destination and guest count; (3) requiring a private pool and a five-minute walk to the beach returned NO_MATCHES and explained both features are unconfirmed, while preserving dates, party and budget.
 - The Demo quote remains a test tariff, not a commercial offer. The checks used no booking, payment or access handlers. Authenticated browser visual/mobile certification remains pending; the founder can test the new experience through the same invitation.
+
+## Listing evidence expansion — October 27
+
+- Audit found structured bedrooms/bathrooms, beds, features/shared spaces and host-managed nearby places already in the property model. Nearby records have no structured travel mode or independent route verification.
+- Pilot-only implementation reads those public fields for Demo. Supports 19 amenity/feature criteria plus minimum bedroom/full-bathroom counts. Missing counts fail closed; beds do not substitute for bedrooms and half bathrooms do not substitute for full bathrooms. Private/shared pool ambiguity is not advertised as a private pool.
+- The stay dialog shows host-published features, room/bathroom/bed data, pool privacy and reported nearby places with explicit provenance and unknown travel mode. No production property enrollment or data changes.
+- Fourteen API/search/evidence test groups and the React interaction test passed; strict API/client type checks and production build passed. UI test covers detail-dialog facts, shared-pool disclosure, bedroom minimum editing and the unknown transport label. This remains a DOM test, not authenticated mobile visual certification.
+- A real model request correctly extracted entire lodging, two bedrooms, two full bathrooms, ocean view and workspace, preserving five-minute walking proximity as an unsupported Spanish requirement.
+- Deployment and live catalog checks pending at this commit.
