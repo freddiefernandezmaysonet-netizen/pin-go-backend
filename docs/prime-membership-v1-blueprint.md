@@ -216,7 +216,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
 3. **Suscripción:** revisar el recorrido propuesto de recuperación de pagos y registro; validar la configuración de reintentos de Stripe Billing, su resultado final y las reglas de reactivación. Cualquier período de gracia adicional requiere definición. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Integrar el reparto recurrente con Stripe Connect, verificar la configuración de pagos de la cuenta conectada y definir recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% y el uso de Stripe Connect están confirmados; los detalles nuevos son propuestas.
-5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
+5. **Descuento y compra:** decidir la combinación con otras promociones entre las alternativas documentadas en «Cotización Prime», y completar el tratamiento de modificaciones de una reserva. Revisar la propuesta de cálculo sobre la tarifa vigente de cada noche. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
@@ -259,9 +259,42 @@ La suscripción y la reservación conservan su identidad, importes y confirmacio
 
 Antes de confirmar la reservación se vuelven a comprobar disponibilidad, precio, afiliación de la propiedad y elegibilidad Prime. Si la membresía se pagó pero la reserva no se completa, deben mostrarse ambos estados y un recorrido de recuperación; aún falta definir la resolución comercial de ese caso. Esta propuesta no promete un cobro único ni define todavía la coordinación concreta de pagos.
 
+### Cotización Prime: cálculo y promociones propuestos
+
+La base del descuento está confirmada: únicamente alojamiento por noche y el porcentaje de 5–20% configurado en esa propiedad. Se propone integrar el cálculo así:
+
+1. Obtener del motor existente la tarifa vigente de cada noche, con sus ajustes dinámicos, tarifas manuales, límites y redondeos actuales. Usar la suma de esas noches como base; no multiplicar la tarifa base de la propiedad si las noches tienen importes distintos.
+2. Comprobar en el servidor la participación de la propiedad y la elegibilidad del miembro. Aplicar una sola vez el porcentaje Prime de la propiedad al subtotal de alojamiento, con cálculo monetario exacto y redondeo final a centavos. La política de redondeo y cualquier distribución por noche deben producir el mismo total en cotización, reserva y cobro.
+3. Mantener limpieza y amenidades como conceptos separados, sin aplicarles el porcentaje Prime. Un extra cobrado por noche sigue siendo un extra, no se convierte en alojamiento por su frecuencia de cobro.
+4. Recalcular los impuestos y el total mediante el motor de cotización, usando el alojamiento ya descontado y las reglas fiscales configuradas y validadas para la propiedad. El descuento de alojamiento y la variación de impuestos se muestran por separado cuando corresponda; esta propuesta no determina reglas fiscales nuevas.
+5. Si el cliente compra Prime en ese recorrido, presentar también el importe completo del plan elegido. Si ya es miembro vigente, reservar no agrega otra cuota de membresía.
+
+Ejemplo ilustrativo, sin impuestos: noches de USD 150, USD 180 y USD 120 suman USD 450. Un 10% Prime descuenta USD 45 y deja USD 405 de alojamiento. Con USD 60 de limpieza y USD 20 de extras, la reserva suma USD 485 antes de impuestos y de cualquier compra de membresía. La comparación regular equivalente es USD 530 antes de impuestos.
+
+La propuesta aplica Prime después de calcular las tarifas regulares, incluidos sus límites. Por ello, el importe con Prime puede quedar por debajo del mínimo configurado para la tarifa regular; este efecto debe quedar visible para el anfitrión al seleccionar el descuento. La implementación no debe recortar silenciosamente el porcentaje obligatorio de Prime para volver a ese mínimo. Esta ubicación del descuento dentro del cálculo queda identificada como propuesta para revisión.
+
+#### Combinación con otras promociones: decisión pendiente
+
+Las reglas dinámicas y las tarifas manuales forman la tarifa vigente y no constituyen por sí solas un segundo cupón. Para otras promociones explícitas sobre el alojamiento, se presentan estas alternativas al fundador:
+
+| Alternativa | Ejemplo con Prime 10% y otra promoción válida de 15% |
+| --- | --- |
+| Aplicar el descuento más favorable, sin acumular | Se usa el 15% de la promoción. La cotización identifica qué descuento aplicó. |
+| Permitir acumulación consecutiva | Primero se reduce 15% y luego se aplica 10% al importe restante: reducción combinada de 23.5%, no 25%. El orden y los demás tipos de descuento requieren reglas explícitas. |
+| Configurar la acumulación por propiedad | Cada anfitrión indica si permite combinar promociones en ese alojamiento; la cotización aplica su regla guardada. |
+
+La propuesta inicial es aplicar el descuento válido más favorable sin acumular, para mantener una regla predecible sobre el precio final. Esta preferencia no se considera aprobada ni implementada. La comparación debe considerar las condiciones completas de las ofertas disponibles: una promoción también accesible a quien no es miembro no se presenta como ahorro adicional exclusivo de Prime.
+
+#### Precio confirmado y cambios posteriores
+
+Guardar con la reserva el porcentaje y la base aplicados, el importe del descuento, el desglose y la evidencia de elegibilidad. Cambiar después el descuento de la propiedad o cancelar la renovación de Prime conserva el precio ya aceptado, según la regla confirmada. Una solicitud de nuevas fechas, noches o extras requiere su cotización y aceptación; no modifica por sí sola la reserva original. La política comercial para esas modificaciones continúa pendiente.
+
+Pin AI, las tarjetas de resultados, el detalle de la propiedad y el checkout deben mostrar el mismo descuento y total calculados por el servidor. Si cambia el precio o la disponibilidad antes del pago, el cliente debe ver el resultado actualizado antes de confirmar. La certificación debe cubrir ambos extremos del rango 5–20%, noches con tarifas distintas, extras por noche, redondeo, membresía recién pagada, miembro existente, cambio de porcentaje de la propiedad y ausencia de doble descuento.
+
 ### Evidencia de la revisión del checkout actual
 
 - `src/routes/public-booking.routes.ts` contiene `/quote`, que usa `calculateDirectBookingPricing`, y `/create-checkout`, que vuelve a consultar disponibilidad y precio. El checkout revisado usa un pago de reservación (`mode: payment`); la suscripción recurrente Prime necesita una integración específica.
+- En la copia de backend `af10a9d9191480d6b5b65f902abeb41859ece21a`, `src/services/direct-booking-pricing.service.ts` suma `nightlyRates` en `nightlySubtotal`, calcula limpieza y amenidades por separado y luego impuestos y total. La función revisada no recibe parámetros de membresía, descuento Prime o cupón; la integración debe extender de forma controlada ese cálculo y sus validaciones, conservando el comportamiento existente para reservas sin Prime.
 - `src/pages/public-booking/PublicPropertyDetailPage.tsx`, en la copia del dashboard revisada, consulta `/api/public-booking/quote` y muestra noches, limpieza, amenidades e impuestos. Esos son los puntos de presentación propuestos para el desglose Prime.
 - La revisión es de código. No se crearon productos, precios, suscripciones, pagos, reservas ni cambios de checkout en producción.
 
