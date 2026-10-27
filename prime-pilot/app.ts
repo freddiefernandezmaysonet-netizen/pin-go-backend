@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { criteriaSchema, emptyCriteria, historySchema, interpret, composeReply, fallbackReply, eligible, searchCatalog, validateStay, type ConversationFacts } from './search.js';
 import { hasTripDetails, savedTripStore, tripIdSchema, tripInputSchema } from './saved-trips.js';
+import { enrollmentInputSchema, enrollmentStore } from './enrollment.js';
 
 export function createPilotApp(options: { dataDir: string; bootstrapHash?: string; production: boolean; catalog: Parameters<typeof searchCatalog>[1]; interpret?: typeof interpret; composeReply?: typeof composeReply }) {
 const { dataDir, catalog } = options;
@@ -58,11 +59,30 @@ app.use('/api', (req, res, next) => {
     const expected = createHmac('sha256', config!.sessionSecret).update(payload).digest('base64url');
     const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString());
     if (!signature || !equal(signature, expected) || parsed.member !== 'prime-pilot-founder' || !(parsed.exp > Date.now())) throw new Error();
+    res.locals.primePrincipal = parsed.member;
   } catch { return void res.status(401).json({ error: 'SESSION_REQUIRED' }); }
   next();
 });
 app.delete('/api/session', (_req, res) => { res.clearCookie('prime_session', { path: '/api' }); res.json({ ok: true }); });
-app.get('/api/member', (_req, res) => res.json({ name: 'Freddie', status: 'PILOT', expiresAt: config!.expiresAt, cardStatus: 'NFC_PILOT_VERIFIED', activeAccesses: 0, trips: [] }));
+app.get('/api/member', (_req, res) => res.json({ name: 'Freddie', status: 'PILOT', capabilities: ['PILOT_HOST_SETUP'], expiresAt: config!.expiresAt, cardStatus: 'NFC_PILOT_VERIFIED', activeAccesses: 0, trips: [] }));
+const enrollment = enrollmentStore(dataDir);
+app.use('/api/pilot/enrollment', (_req, res, next) => {
+  if (res.locals.primePrincipal !== 'prime-pilot-founder') return void res.status(403).json({ error: 'PILOT_FOUNDER_REQUIRED' });
+  next();
+});
+app.get('/api/pilot/enrollment', (_req, res) => {
+  try { res.json({ enrollment: enrollment.read() }); }
+  catch { res.status(503).json({ error: 'ENROLLMENT_UNAVAILABLE' }); }
+});
+app.put('/api/pilot/enrollment', (req, res) => {
+  const parsed = enrollmentInputSchema.safeParse(req.body);
+  if (!parsed.success) return void res.status(400).json({ error: 'INVALID_ENROLLMENT' });
+  try {
+    const result = enrollment.save(parsed.data);
+    if (result.error) return void res.status(409).json({ error: result.error });
+    res.json(result);
+  } catch { res.status(503).json({ error: 'ENROLLMENT_UNAVAILABLE' }); }
+});
 const plans = savedTripStore(dataDir);
 app.get('/api/saved-trips', (_req, res) => {
   try { res.json({ trips: plans.list() }); }
@@ -110,17 +130,28 @@ app.post('/api/search', async (req, res) => {
       ({ criteria, clarification, intent } = await interpretCriteria(message, criteria, config!.PRIME_OPENAI_API_KEY, language, today(), history));
     }
     const missing = validateStay(criteria, today());
-    const properties = (await catalog.catalog()).filter(eligible);
+    const paused = enrollment.read().participation === 'PAUSED';
+    let properties = paused ? [] : (await catalog.catalog()).filter(eligible);
     let facts: ConversationFacts = { criteria, clarification, missing, results: [], failed: 0, status: intent === 'chat' ? 'CHAT' : intent === 'question' ? 'QUESTION' : 'NEEDS_DETAILS' };
-    if (intent === 'search' && !missing.length && !clarification) {
+    if (intent === 'search' && paused) facts.status = 'CATALOG_PAUSED';
+    else if (intent === 'search' && !missing.length && !clarification) {
       const found = await searchCatalog(criteria, { ...catalog, catalog: async () => properties });
       facts = { ...facts, ...found, status: found.failed ? 'PARTIAL_ERROR' : found.results.length ? 'RESULTS' : 'NO_MATCHES' };
     }
+    if (enrollment.read().participation === 'PAUSED') {
+      properties = [];
+      if (intent === 'search') facts = { ...facts, status: 'CATALOG_PAUSED', results: [], failed: 0, diagnostics: undefined };
+    }
     let reply = fallbackReply(facts, language);
     let replyFallback = false;
-    if (message) {
+    if (message && facts.status !== 'CATALOG_PAUSED') {
       try { reply = await replyToTraveler(message, history, facts, properties, config!.PRIME_OPENAI_API_KEY, language); }
       catch { replyFallback = true; } // A narration failure must not discard a verified quote.
+    }
+    // A pause during an in-flight provider call must also invalidate its result and narration.
+    if (intent === 'search' && enrollment.read().participation === 'PAUSED') {
+      facts = { ...facts, status: 'CATALOG_PAUSED', results: [], failed: 0, diagnostics: undefined };
+      reply = fallbackReply(facts, language);
     }
     res.json({ ...facts, reply, replyFallback });
   } catch (error) {

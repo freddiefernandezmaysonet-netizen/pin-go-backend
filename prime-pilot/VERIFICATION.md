@@ -60,3 +60,13 @@ Production `OPENAI_API_KEY`, public booking settings, production API routes, wor
 - The first external probe had a transient connection failure during rollout. Health, client and private endpoint checks subsequently passed, followed by the full authenticated live test.
 - Live test passed: create a uniquely marked temporary plan, reload its criteria, resume with a fresh canonical Demo quote (USD 6.69 test tariff), update to 2 bedrooms plus private pool/walking proximity, preserve all requirements, and return NO_MATCHES with the bedroom exclusion. Cross-origin update/delete attempts returned 403.
 - The temporary test plan was removed and all pre-existing plans were preserved. Save/update/remove/resume made zero OpenAI calls and did not create a reservation, charge or access grant.
+
+## Demo participation and benefit drafts — October 27
+
+- Read-only audit of backend main `af10a9d9191480d6b5b65f902abeb41859ece21a` found no Prime membership/property enrollment model; `PrimeNotifyState` is unrelated. No open backend PR matched Prime during the overlap check. Existing host routes use organization-scoped session identity; commercial enrollment still needs that identity/consent integration.
+- Added founder-only **Anfitrión · Demo** controls inside the isolated pilot: ACTIVE/PAUSED participation and draft-only proposed benefits. Target property and actor are fixed server-side. The pre-existing Demo pilot remains active by default; this does not represent commercial host consent.
+- Private state has schema validation, mode 0600, atomic replacement and expected revision checks. Paused state gates search before catalog reads and is rechecked after awaited work so an in-flight response cannot advertise a paused option. Corrupt enrollment returns an unavailable response.
+- Discounts and other benefits remain private drafts and have no effect on canonical quotes, reservations, payments or NFC grants. Tests confirmed a 20% proposal leaves the original USD 385 fixture quote intact.
+- Twenty API/search/evidence/store test groups and three React interaction tests passed. New coverage includes missing confirmation, arbitrary property rejection, session/origin checks, stale revisions, persistence, pause/resume, corrupted state, pause during generated narration, capability-gated UI and explicit reload after an edit conflict. Strict API/client TypeScript and the production build passed.
+- React review covered hooks/dependencies, canceled initial loads, labels and status/error announcements, disabled conflicting saves, type-only server imports and four-item mobile navigation. Authenticated desktop/mobile visual certification remains pending.
+- Deployment and live participation checks pending at this commit.

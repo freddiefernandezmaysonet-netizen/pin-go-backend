@@ -115,6 +115,7 @@ export async function composeReply(message: string, history: Turn[], facts: Conv
 }
 export function fallbackReply(facts: ConversationFacts, language: 'es' | 'en') {
   const es = language === 'es';
+  if (facts.status === 'CATALOG_PAUSED') return es ? 'La participación de Demo en Prime está pausada, así que ahora no hay propiedades habilitadas en este piloto. Tus requisitos se conservan para consultar otra vez cuando esté activa.' : 'Demo’s Prime participation is paused, so this pilot currently has no enabled properties. Your requirements are preserved for a new search when it is active again.';
   if (facts.clarification) return facts.clarification;
   if (facts.status === 'CHAT') return es ? 'Hola, soy Pin AI. Cuéntame cómo te gustaría que fuera tu próxima escapada.' : 'Hi, I’m Pin AI. Tell me what you would like your next getaway to be like.';
   if (facts.status === 'QUESTION') return es ? 'No pude preparar una respuesta a tu pregunta. ¿Puedes intentarlo otra vez?' : 'I couldn’t prepare an answer to your question. Could you try again?';

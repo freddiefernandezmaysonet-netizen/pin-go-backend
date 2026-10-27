@@ -29,6 +29,12 @@ Saved trip plans are an explicit opt-in via **Guardar viaje / Save trip**. Only 
 
 **Mis viajes** distinguishes planning ideas from confirmed bookings. Reopening a plan clears transient chat/results and calls the existing validated search again with the saved criteria, so dates, availability and quotes are current. These operations make no OpenAI calls and never create or alter reservations. Future multi-member rollout requires a tenant-scoped database-backed account/store design; the single-process pilot store must not be reused for that rollout.
 
+The **Anfitrión · Demo / Host · Demo** screen is a founder-only pilot configuration, not production host enrollment. The existing signed founder session advertises `PILOT_HOST_SETUP`; server routes also require the authenticated founder principal. The target is fixed to Demo; callers cannot choose an organization or another property. Production organization roles, ownership verification, versioned host consent and member entitlements still require a separate implementation.
+
+`/api/pilot/enrollment` reads or updates the private `demo-prime-enrollment.json` file with mode 0600 and atomic replacement. The existing explicitly authorized Demo catalog remains active when no configuration file exists; no commercial consent is manufactured. Writes require a current revision and explicit `confirmPilotOnly:true`; stale updates return 409. Invalid stored state fails closed. Pausing removes Demo from new searches and from an in-flight result if paused before response. Saved trip requirements remain intact. Only the founder’s pilot view can edit this state.
+
+Benefit settings (proposed nightly discount, early check-in/late-checkout requests and personal NFC) are **draft-only**. They are never passed into price calculations, advertised to the search model as active benefits, charged, applied to reservations or used to grant access. Membership price, discount funding, contract terms and activation remain undefined here. The founder may review the draft independently of the separate checkout proposal.
+
 Required service variables: `DATABASE_URL` (reference to the existing database), `NODE_ENV=production`, `PRIME_DATA_DIR=/prime-data`; temporary `PRIME_BOOTSTRAP_SHA256` only for initial setup. The persistent volume is isolated to this service. No production credentials are copied into source or published artifacts.
 
 Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Git-ignored. Run `PRIME_PILOT_URL=https://<the-created-service>.up.railway.app node --env-file=.env.prime.local prime-pilot/provision.mjs`. The helper prints only status. Never run it against an unverified destination. Do not regenerate keys on a setup retry.
@@ -36,7 +42,7 @@ Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Gi
 ## Validation
 
 ```
-node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts prime-pilot/property-facts.test.ts prime-pilot/saved-trips.test.ts
+node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts prime-pilot/property-facts.test.ts prime-pilot/saved-trips.test.ts prime-pilot/enrollment.test.ts
 npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --esModuleInterop prime-pilot/search.ts prime-pilot/catalog.ts prime-pilot/app.ts prime-pilot/server.ts
 npm ci --prefix prime-pilot
 npm run typecheck --prefix prime-pilot

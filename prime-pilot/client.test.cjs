@@ -27,6 +27,7 @@ test('React UI holds a conversation, sends context, edits details, resets and si
   try {
     dom.window.eval(bundle.outputFiles[0].text);
     await wait(() => text().includes('Tu próxima estancia'));
+    assert.equal(text().includes('Anfitrión · Demo'), false); // No founder tools without the capability.
     click('Mi tarjeta Prime'); await wait(() => text().includes('Prueba NFC superada'));
     click('Mis viajes'); await wait(() => text().includes('Tu próxima historia empieza aquí.'));
     click('English'); await wait(() => text().includes('Your next story starts here.'));
@@ -57,6 +58,53 @@ test('React UI holds a conversation, sends context, edits details, resets and si
     assert.equal(dom.window.document.querySelectorAll('.prime-turn-user').length, 0);
     assert.equal(dom.window.document.querySelector('input[type=date]'), null);
     click('Cerrar sesión'); await wait(() => text().includes('Código de invitación')); assert.equal(logouts, 1);
+  } finally { dom.window.close(); }
+});
+
+test('founder enrollment UI saves explicit drafts, distinguishes saved status and requires reload on conflict', async () => {
+  const bundle = await build({ entryPoints: [path.join(__dirname, 'client/main.tsx')], bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } });
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://prime.test/', runScripts: 'outside-only' });
+  let enrollment = { version: 1, propertyId: 'cmomyua8b0001rv1dvl6xjr6g', revision: 0, participation: 'ACTIVE', benefitDraft: { nightlyDiscountPercent: 0, earlyCheckInRequest: false, lateCheckoutRequest: false, personalNfc: false }, benefitsDraftOnly: true, updatedAt: null, updatedBy: null };
+  let writes = 0;
+  dom.window.AbortSignal.timeout = () => new dom.window.AbortController().signal;
+  dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  dom.window.fetch = async (url, options) => {
+    if (url.endsWith('/member')) return { ok: true, json: async () => ({ name: 'Freddie', capabilities: ['PILOT_HOST_SETUP'] }) };
+    assert.ok(url.endsWith('/pilot/enrollment'));
+    if (options.method === 'PUT') {
+      const input = JSON.parse(options.body); assert.equal(input.confirmPilotOnly, true);
+      assert.deepEqual(Object.keys(input).sort(), ['benefitDraft', 'confirmPilotOnly', 'expectedRevision', 'participation']);
+      if (input.expectedRevision !== enrollment.revision) return { ok: false, status: 409, json: async () => ({ error: 'ENROLLMENT_CHANGED' }) };
+      writes++; enrollment = { ...enrollment, participation: input.participation, benefitDraft: input.benefitDraft, revision: enrollment.revision + 1, updatedBy: 'prime-pilot-founder', updatedAt: '2026-10-27T12:00:00Z' };
+    }
+    return { ok: true, json: async () => ({ enrollment: JSON.parse(JSON.stringify(enrollment)) }) };
+  };
+  const wait = async fn => { for (let n = 0; n < 100; n++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('host UI timeout'); };
+  const text = () => dom.window.document.body.textContent;
+  const button = label => [...dom.window.document.querySelectorAll('button')].find(b => b.textContent === label);
+  const check = label => { const element = [...dom.window.document.querySelectorAll('label')].find(l => l.textContent.includes(label)); assert.ok(element, label); element.querySelector('input').click(); };
+  const select = value => { const element = dom.window.document.getElementById('prime-participation'); element.value = value; element.dispatchEvent(new dom.window.Event('change', { bubbles: true })); };
+  try {
+    dom.window.eval(bundle.outputFiles[0].text); await wait(() => button('Anfitrión · Demo'));
+    button('Anfitrión · Demo').click(); await wait(() => dom.window.document.getElementById('prime-discount-draft'));
+    assert.ok(text().includes('Activa en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
+    select('PAUSED');
+    const discount = dom.window.document.getElementById('prime-discount-draft');
+    Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(discount, '10'); discount.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    check('Solicitud de entrada temprana');
+    assert.ok(text().includes('Activa en el buscador piloto')); // Pending edits do not claim already saved.
+    check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
+    button('Guardar configuración de Demo').click(); await wait(() => text().includes('Configuración guardada.'));
+    assert.equal(writes, 1); assert.equal(enrollment.participation, 'PAUSED'); assert.equal(enrollment.benefitDraft.nightlyDiscountPercent, 10); assert.equal(enrollment.benefitDraft.earlyCheckInRequest, true);
+    assert.ok(text().includes('Pausada en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
+    enrollment = { ...enrollment, revision: 2, participation: 'ACTIVE', benefitDraft: { ...enrollment.benefitDraft, nightlyDiscountPercent: 30 } };
+    select('ACTIVE'); check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
+    button('Guardar configuración de Demo').click(); await wait(() => text().includes('La configuración cambió'));
+    assert.equal(writes, 1); assert.ok(button('Guardar configuración de Demo').disabled);
+    button('Recargar configuración').click(); await wait(() => dom.window.document.getElementById('prime-discount-draft')?.value === '30');
+    assert.ok(text().includes('Activa en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
+    button('English').click(); await wait(() => text().includes('Proposed benefits'));
+    assert.ok(text().includes('Draft'));
   } finally { dom.window.close(); }
 });
 
