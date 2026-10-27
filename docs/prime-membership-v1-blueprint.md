@@ -18,15 +18,16 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Periodicidad | Membresía mensual. |
 | Precio | USD 9.99 al mes es el precio probable, pendiente de decisión definitiva. No crear todavía un precio comercial como si estuviera aprobado. |
 | Canales de compra | Página de reservas de cualquier anfitrión o directamente en pin-ngo.com. |
-| Comisión por captación | El anfitrión desde cuya página se originó la membresía recibe el 40% de cada mensualidad pagada mientras la membresía siga activa. Es una comisión recurrente, no limitada al primer pago. |
-| Descuento obligatorio | Para participar en Prime, el anfitrión debe ofrecer un descuento elegido entre 5% y 20%. |
+| Comisión por captación | El anfitrión recibe el 40% de cada mensualidad pagada de la membresía originada en la página de su propiedad, mientras siga activa. La atribución y el historial se registran por propiedad; la comisión es recurrente, no limitada al primer pago. |
+| Gestión del anfitrión | Todo se gestiona por propiedad: participación, descuento, beneficios, membresías referidas y comisiones. |
+| Descuento obligatorio | Cada propiedad participante tiene su propio porcentaje, elegido por el anfitrión entre 5% y 20%. |
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
 | Primera tarjeta y envío | Incluidos en la membresía, sin cargo adicional para el miembro. |
 | Reemplazo por extravío | USD 5 por reemplazar una tarjeta extraviada. |
 | Cancelación de membresía | Sin permanencia mínima; conserva beneficios hasta terminar el período ya pagado. |
 | Reservaciones ya confirmadas | Conservan el precio acordado y el acceso correspondiente a la estancia aunque se cancele la renovación de Prime. |
 
-La venta de la membresía debe conservar el origen de adquisición y el anfitrión correspondiente para atribuir las mensualidades. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones.
+La venta de la membresía debe conservar la propiedad de origen y el anfitrión correspondiente para atribuir las mensualidades. Las comisiones recurrentes se registran en esa propiedad de origen. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones. La gestión por propiedad corresponde a las funciones del anfitrión; el miembro mantiene su cuenta Prime y su tarjeta personal reutilizable para viajar entre propiedades participantes.
 
 Ejemplo ilustrativo del descuento: tres noches de USD 150 producen un subtotal de alojamiento de USD 450. Con 10% Prime, el descuento es USD 45 y el alojamiento queda en USD 405. Limpieza y otros conceptos se incorporan por separado. Este ejemplo no constituye una tarifa real ni fija un tratamiento fiscal.
 
@@ -102,14 +103,14 @@ El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y e
 2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
-5. **Descuento:** configuración por propiedad o común al anfitrión; combinación con otras promociones y cambios aplicables a reservas existentes. La obligatoriedad, rango 5–20% y base de alojamiento por noche ya están confirmados.
+5. **Descuento:** combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
 
 ## Experiencia del anfitrión: propuesta de pantalla
 
-Esta sección concreta el diseño del dashboard del anfitrión. La obligatoriedad del descuento de 5–20% sobre alojamiento y la comisión recurrente de 40% están confirmadas. La ubicación de los controles y la posibilidad de elegir porcentajes diferentes por propiedad son propuestas pendientes de decisión.
+Esta sección concreta el diseño del dashboard del anfitrión. Está confirmado que toda la gestión de Prime para el anfitrión se realiza por propiedad: participación, descuento obligatorio de 5–20% sobre alojamiento, beneficios, membresías referidas y comisiones recurrentes de 40%. La presentación concreta de los controles sigue siendo una propuesta de pantalla.
 
 ### Participación y beneficios
 
@@ -123,25 +124,26 @@ Propuesta: añadir «Pin&Go Prime» a la configuración del alojamiento con esto
 | Resumen de condiciones | Mostrar la participación y el descuento guardados, con fecha de actualización. |
 | Reservas anteriores | Conservar el precio acordado de las reservas ya confirmadas al cambiar el porcentaje o pausar nuevas ofertas. |
 
-Se propone permitir un porcentaje distinto en cada propiedad, ya que un anfitrión puede querer ofrecer condiciones diferentes según el alojamiento. Ejemplo ilustrativo: una propiedad con 5% y otra con 15%. El fundador debe decidir entre esa opción y un porcentaje común para todas sus propiedades antes de implementar el control.
+El fundador confirmó que el porcentaje se configura independientemente en cada propiedad. Ejemplo ilustrativo: una propiedad con 5% y otra con 15%. Cada alojamiento conserva su propia configuración e historial; modificar una propiedad no modifica los porcentajes de las demás.
 
-Los canales de compra de membresías ya acordados se mantienen. Registrar una venta de membresía desde una página del anfitrión debe conservar su atribución comercial; la participación de un alojamiento en el catálogo requiere su configuración explícita de Prime.
+Los canales de compra de membresías ya acordados se mantienen. Registrar una venta desde la página de una propiedad debe conservar esa propiedad y su anfitrión como origen comercial; la participación del alojamiento en el catálogo requiere su configuración explícita de Prime. Una entrada de compra sin propiedad identificada requiere resolver su origen antes de atribuir una comisión a un alojamiento.
 
 ### Comisiones de membresías
 
-Propuesta: una sección «Mis comisiones Prime» en el dashboard del anfitrión, agregada para su organización:
+Propuesta de presentación: una sección «Comisiones Prime» dentro de la propiedad seleccionada en el dashboard del anfitrión. El alcance por propiedad está confirmado:
 
-- Membresías originadas en sus páginas y cantidad que continúa activa.
-- Mensualidades efectivamente pagadas por esos referidos.
-- Comisión correspondiente del 40%, con historial por período.
+- Membresías originadas en la página de esa propiedad y cantidad que continúa activa.
+- Mensualidades efectivamente pagadas por los referidos de esa propiedad.
+- Comisión correspondiente del 40%, con historial por propiedad y período.
 - Importe generado, pendiente de liquidación y efectivamente pagado, según evidencia del sistema.
 - Ajustes identificados por separado cuando se definan las políticas de reembolso y disputa.
 
-Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada mensualidad una sola vez. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento, las reglas de redondeo y el calendario de liquidación siguen pendientes; el diseño de pantalla no los fija.
+Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada mensualidad una sola vez, asociada a su propiedad de origen. Las consultas y escrituras deben validar que la propiedad seleccionada pertenece al anfitrión autenticado. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento, las reglas de redondeo y el calendario de liquidación siguen pendientes; el diseño de pantalla no los fija.
 
 ### Base técnica revisada para ubicar estas funciones
 
 - Backend revisado: `af10a9d9191480d6b5b65f902abeb41859ece21a`. `Organization` ya contiene la asociación y el estado de Stripe Connect; `src/routes/dashboard-payouts.routes.ts` obtiene la organización de la sesión autenticada para las consultas de pagos del anfitrión.
+- Esa asociación de pagos existente por organización no cambia el alcance acordado para Prime: configuración, atribución y consulta de comisiones por propiedad. El diseño no implica crear una nueva cuenta de Stripe por cada alojamiento.
 - Copia local del dashboard revisada: `701135729c34296e817060dc7fddf7c608fc2ae0`. Existen pantallas de configuración de propiedades, `src/components/payouts/HostPayoutsExperience.tsx` y contratos de estado de pagos en `src/api/payouts.ts`.
 - Esta es evidencia de estructura existente. La contabilidad de comisiones recurrentes de Prime y su liquidación todavía requieren una integración específica y validación; la revisión no creó cuentas, transferencias ni cambios en Stripe.
 
