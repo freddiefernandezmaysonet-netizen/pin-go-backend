@@ -38,7 +38,7 @@ La referencia al flujo del cleaner significa específicamente **recibir el email
 4. Crea su contraseña y completa los datos requeridos, incluida su dirección de envío.
 5. Entra a su dashboard Prime y utiliza sus credenciales para los siguientes accesos.
 
-El flujo exacto del cleaner deberá auditarse antes de reutilizarlo. Prime tendrá su identidad de miembro y sus permisos propios. Las invitaciones del piloto son una herramienta de prueba; el alta comercial acordada se inicia con la compra y el email de bienvenida.
+Se revisó el mecanismo actual de activación del cleaner en el commit indicado en «Evidencia y punto de partida»; el detalle está en la siguiente sección. Prime tendrá su identidad de miembro y sus permisos propios. Las invitaciones del piloto son una herramienta de prueba; el alta comercial acordada se inicia con la compra y el email de bienvenida.
 
 El registro inicial incluye:
 
@@ -52,11 +52,45 @@ El registro inicial incluye:
 
 La dirección se solicita **durante el registro inicial**, según la aclaración expresa del fundador, para poder enviar la tarjeta física de acceso. Idioma y preferencias de viaje pueden completarse después desde el dashboard.
 
+## Auditoría del registro del cleaner y adaptación propuesta
+
+Revisión de código, sin modificaciones a producción, envío de mensajes ni creación de cuentas:
+
+- `src/services/cleaner-account.service.ts`: genera un enlace aleatorio, guarda su hash, comprueba correo y vigencia, valida y guarda la contraseña mediante hash, crea la cuenta y consume los enlaces pendientes. El enlace actual del cleaner vence a las 48 horas y depende de su asignación de limpieza y de una reserva activa.
+- `src/routes/cleaner-account.routes.ts`: presenta el formulario de correo/contraseña y, al completar la activación, ofrece entrar a «Mis limpiezas».
+- `src/services/cleaning-confirmation-dispatch.service.ts` y `src/routes/cleaning-confirm.routes.ts`: en el flujo revisado, el enlace se transporta con la confirmación de limpieza por SMS y conduce a la activación. Esta auditoría no encontró en ese recorrido un email de bienvenida del cleaner listo para reutilizar.
+
+La experiencia solicitada para Prime sigue siendo **email de bienvenida después del pago**, con botón «Crear mi contraseña». Se reutilizará el patrón de enlace de un solo uso, validación y contraseña protegida; la implementación debe vincularlo con el miembro y su compra de Prime. Las dependencias de limpieza y el rol CLEANER pertenecen al servicio existente.
+
+Detalles técnicos propuestos para implementar el alta, aún sin activar:
+
+1. La confirmación de pago validada por el servidor identifica la compra, el correo y el anfitrión de origen, si existe. Repetir la notificación del mismo pago conserva la misma cuenta y no genera otra comisión.
+2. El email de bienvenida permite completar la contraseña, el perfil y la dirección. El enlace tendrá vencimiento y recuperación/reenvío; el plazo de Prime se definirá al implementar, sin trasladar automáticamente la regla de 48 horas del cleaner.
+3. La cuenta permite iniciar sesión una vez completado el registro. La gestión del envío requiere la dirección completa y la asociación de la tarjeta con el miembro.
+4. Un fallo de entrega del email debe poder recuperarse sin cobrar otra vez. Si el correo ya pertenece a una cuenta Prime, se deberá recuperar o vincular el acceso verificado, conservando sus viajes.
+
+La cuenta, la suscripción, el envío de la tarjeta y los permisos de cada estancia tendrán estados separados para mostrar al miembro qué está realmente listo.
+
+## Ciclo de suscripción: propuesta pendiente de decisión
+
+Esta tabla organiza el siguiente punto de diseño. Las reglas de cancelación, renovación fallida y conservación de beneficios en reservas existentes **todavía no han sido aceptadas por el fundador**.
+
+| Situación | Comportamiento propuesto |
+| --- | --- |
+| Primer pago confirmado | Enviar la bienvenida y permitir completar el registro. |
+| Membresía vigente | Mostrar fecha de próxima renovación y beneficios disponibles. Renovación mensual automática, con las condiciones mostradas antes de comprar. |
+| El miembro cancela la renovación | Permitir cancelación sin permanencia mínima; conservar beneficios hasta terminar el período ya pagado. Mostrar la fecha exacta de finalización. |
+| Falla una renovación | Avisar y permitir actualizar el método de pago. Respetar el período previamente pagado; al vencer, suspender beneficios para nuevas reservas. Reintentos y cualquier período de gracia quedan por definir. |
+| La membresía vence | Mantener acceso a cuenta, recibos, viajes existentes y reactivación; restringir nuevos beneficios Prime hasta un nuevo pago confirmado. |
+| Ya existen reservaciones confirmadas | Conservar el precio aceptado y el acceso correspondiente a esas estancias, sin cancelarlas ni retirar su acceso por cancelar la renovación de Prime. Cambios posteriores y nuevas reservas requieren sus propias validaciones. |
+
+La propuesta permite distinguir «cancelar la próxima renovación» de «cancelar una reservación». El envío inicial de tarjeta no impone una permanencia mínima no acordada. La comisión del anfitrión sigue vinculada a mensualidades efectivamente pagadas; los ajustes por reembolsos y disputas continúan pendientes.
+
 ## Tarjeta personal y envío: alcance del diseño
 
 La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **la primera tarjeta y su envío están incluidos en la membresía, sin cargo adicional**. Si el miembro extravía la tarjeta, se cobra **USD 5 por el reemplazo**. Quedan por definir los destinos atendidos y la logística de entrega y reposición. El cargo acordado corresponde a extravío; los casos de defecto, daño o pérdida durante el transporte no están definidos por esta decisión.
 
-El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de definición. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
+El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de decisión; la sección de ciclo de suscripción propone conservar esa estancia y su acceso. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
 
 ## Decisiones pendientes, en orden de diseño
 
