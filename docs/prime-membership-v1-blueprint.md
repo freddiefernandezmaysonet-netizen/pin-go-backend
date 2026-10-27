@@ -22,6 +22,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Medio de liquidación al anfitrión | Confirmado por el fundador: Stripe Connect, utilizando la cuenta conectada existente del anfitrión. El abono bancario sigue la configuración de pagos de esa cuenta y la disponibilidad de fondos. |
 | Gestión del anfitrión | Todo se gestiona por propiedad: participación, descuento, beneficios, membresías referidas y comisiones. |
 | Descuento obligatorio | Cada propiedad participante tiene su propio porcentaje, elegido por el anfitrión entre 5% y 20%. |
+| Descuento en el dashboard Prime | Confirmado: mostrar y aplicar únicamente el descuento establecido para la membresía en esa propiedad. No se acumula con otras promociones ni se sustituye por una promoción de otro canal. |
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
 | Uso desde la primera reserva | Confirmado: una membresía adquirida durante el checkout permite aplicar el descuento Prime en esa misma reserva, con el pago de la membresía confirmado. |
 | Primera tarjeta y envío | Incluidos en la membresía, sin cargo adicional para el miembro. |
@@ -216,7 +217,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
 3. **Suscripción:** revisar el recorrido propuesto de recuperación de pagos y registro; validar la configuración de reintentos de Stripe Billing, su resultado final y las reglas de reactivación. Cualquier período de gracia adicional requiere definición. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Integrar el reparto recurrente con Stripe Connect, verificar la configuración de pagos de la cuenta conectada y definir recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% y el uso de Stripe Connect están confirmados; los detalles nuevos son propuestas.
-5. **Descuento y compra:** decidir la combinación con otras promociones entre las alternativas documentadas en «Cotización Prime», y completar el tratamiento de modificaciones de una reserva. Revisar la propuesta de cálculo sobre la tarifa vigente de cada noche. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
+5. **Descuento y compra:** completar el tratamiento de modificaciones de una reserva y revisar la propuesta de cálculo sobre la tarifa vigente de cada noche. Ya está confirmado que el dashboard Prime utiliza únicamente el descuento de membresía configurado por propiedad, sin combinarlo ni sustituirlo por otras promociones. También están confirmados el uso desde la primera reserva, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
@@ -259,9 +260,9 @@ La suscripción y la reservación conservan su identidad, importes y confirmacio
 
 Antes de confirmar la reservación se vuelven a comprobar disponibilidad, precio, afiliación de la propiedad y elegibilidad Prime. Si la membresía se pagó pero la reserva no se completa, deben mostrarse ambos estados y un recorrido de recuperación; aún falta definir la resolución comercial de ese caso. Esta propuesta no promete un cobro único ni define todavía la coordinación concreta de pagos.
 
-### Cotización Prime: cálculo y promociones propuestos
+### Cotización Prime: descuento confirmado y cálculo propuesto
 
-La base del descuento está confirmada: únicamente alojamiento por noche y el porcentaje de 5–20% configurado en esa propiedad. Se propone integrar el cálculo así:
+La base del descuento está confirmada: únicamente alojamiento por noche y el porcentaje de 5–20% configurado en esa propiedad. El fundador confirmó además que el dashboard Prime ofrece únicamente ese descuento de membresía. Se propone integrar el cálculo así:
 
 1. Obtener del motor existente la tarifa vigente de cada noche, con sus ajustes dinámicos, tarifas manuales, límites y redondeos actuales. Usar la suma de esas noches como base; no multiplicar la tarifa base de la propiedad si las noches tienen importes distintos.
 2. Comprobar en el servidor la participación de la propiedad y la elegibilidad del miembro. Aplicar una sola vez el porcentaje Prime de la propiedad al subtotal de alojamiento, con cálculo monetario exacto y redondeo final a centavos. La política de redondeo y cualquier distribución por noche deben producir el mismo total en cotización, reserva y cobro.
@@ -273,23 +274,19 @@ Ejemplo ilustrativo, sin impuestos: noches de USD 150, USD 180 y USD 120 suman U
 
 La propuesta aplica Prime después de calcular las tarifas regulares, incluidos sus límites. Por ello, el importe con Prime puede quedar por debajo del mínimo configurado para la tarifa regular; este efecto debe quedar visible para el anfitrión al seleccionar el descuento. La implementación no debe recortar silenciosamente el porcentaje obligatorio de Prime para volver a ese mínimo. Esta ubicación del descuento dentro del cálculo queda identificada como propuesta para revisión.
 
-#### Combinación con otras promociones: decisión pendiente
+#### Dashboard Prime: únicamente descuento de membresía
 
-Las reglas dinámicas y las tarifas manuales forman la tarifa vigente y no constituyen por sí solas un segundo cupón. Para otras promociones explícitas sobre el alojamiento, se presentan estas alternativas al fundador:
+Regla confirmada por el fundador: en el dashboard Prime se muestra y aplica únicamente el descuento de membresía establecido por la propiedad. La búsqueda con Pin AI, los resultados, el detalle y la cotización deben conservar esa misma regla durante el recorrido de reserva iniciado desde el dashboard.
 
-| Alternativa | Ejemplo con Prime 10% y otra promoción válida de 15% |
-| --- | --- |
-| Aplicar el descuento más favorable, sin acumular | Se usa el 15% de la promoción. La cotización identifica qué descuento aplicó. |
-| Permitir acumulación consecutiva | Primero se reduce 15% y luego se aplica 10% al importe restante: reducción combinada de 23.5%, no 25%. El orden y los demás tipos de descuento requieren reglas explícitas. |
-| Configurar la acumulación por propiedad | Cada anfitrión indica si permite combinar promociones en ese alojamiento; la cotización aplica su regla guardada. |
+El anfitrión configura su porcentaje Prime entre 5% y 20%. Este recorrido no ofrece acumulación de promociones, selección de cupones ni sustitución por otro descuento que resulte mayor. Por ejemplo, si una propiedad tiene 10% Prime, ese es el descuento que muestra el dashboard Prime.
 
-La propuesta inicial es aplicar el descuento válido más favorable sin acumular, para mantener una regla predecible sobre el precio final. Esta preferencia no se considera aprobada ni implementada. La comparación debe considerar las condiciones completas de las ofertas disponibles: una promoción también accesible a quien no es miembro no se presenta como ahorro adicional exclusivo de Prime.
+Las reglas dinámicas y las tarifas manuales siguen formando la tarifa vigente según la propuesta de cálculo; no son un segundo cupón. Las comparaciones deben identificar su base y sus condiciones, sin afirmar que el precio Prime es necesariamente el menor de todos los canales. La regla aprobada se limita al dashboard Prime y su recorrido de reserva.
 
 #### Precio confirmado y cambios posteriores
 
 Guardar con la reserva el porcentaje y la base aplicados, el importe del descuento, el desglose y la evidencia de elegibilidad. Cambiar después el descuento de la propiedad o cancelar la renovación de Prime conserva el precio ya aceptado, según la regla confirmada. Una solicitud de nuevas fechas, noches o extras requiere su cotización y aceptación; no modifica por sí sola la reserva original. La política comercial para esas modificaciones continúa pendiente.
 
-Pin AI, las tarjetas de resultados, el detalle de la propiedad y el checkout deben mostrar el mismo descuento y total calculados por el servidor. Si cambia el precio o la disponibilidad antes del pago, el cliente debe ver el resultado actualizado antes de confirmar. La certificación debe cubrir ambos extremos del rango 5–20%, noches con tarifas distintas, extras por noche, redondeo, membresía recién pagada, miembro existente, cambio de porcentaje de la propiedad y ausencia de doble descuento.
+Pin AI, las tarjetas de resultados, el detalle de la propiedad y el checkout deben mostrar el mismo descuento y total calculados por el servidor. Si cambia el precio o la disponibilidad antes del pago, el cliente debe ver el resultado actualizado antes de confirmar. La certificación debe cubrir ambos extremos del rango 5–20%, noches con tarifas distintas, extras por noche, redondeo, membresía recién pagada, miembro existente, cambio de porcentaje de la propiedad y ausencia de doble descuento. Para el recorrido del dashboard Prime, también debe comprobar que otras promociones no se acumulan ni sustituyen el porcentaje de membresía, incluso cuando sean mayores.
 
 ### Evidencia de la revisión del checkout actual
 
@@ -416,7 +413,7 @@ Inicio da prioridad a «Cuéntale a Pin AI cómo quieres tus próximas vacacione
 
 La conversación permite expresar todos los requisitos juntos y continuar con cambios naturales. Pin AI pregunta solo por lo que falte o resulte ambiguo, conserva los requisitos durante la conversación y explica por qué encaja cada resultado. Los criterios editables acompañan la conversación. «Cerca de la playa» requiere concretar distancia o forma de desplazamiento cuando sea necesario; piscina privada y piscina compartida se distinguen según evidencia de la propiedad.
 
-Cada resultado muestra el descuento de esa propiedad sobre las noches, el total de la estancia con su desglose y las condiciones de sus beneficios. Para un miembro vigente, el importe de reservar no incluye otra compra de Prime. Si no hay resultados compatibles, se explica qué requisito limita la búsqueda y se ofrecen cambios que el miembro puede elegir. No se presenta una alternativa como coincidencia completa si incumple un requisito obligatorio.
+Cada resultado muestra únicamente el descuento Prime configurado por esa propiedad sobre las noches, el total de la estancia con su desglose y las condiciones de sus beneficios. No se ofrecen otras promociones ni combinaciones de descuentos en el dashboard Prime. Para un miembro vigente, el importe de reservar no incluye otra compra de Prime. Si no hay resultados compatibles, se explica qué requisito limita la búsqueda y se ofrecen cambios que el miembro puede elegir. No se presenta una alternativa como coincidencia completa si incumple un requisito obligatorio.
 
 ### Mis viajes
 
