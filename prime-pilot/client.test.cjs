@@ -61,7 +61,7 @@ test('React UI holds a conversation, sends context, edits details, resets and si
   } finally { dom.window.close(); }
 });
 
-test('founder enrollment UI saves explicit drafts, distinguishes saved status and requires reload on conflict', async () => {
+test('founder enrollment UI requires 5–20%, preserves empty paused drafts and requires reload on conflict', async () => {
   const bundle = await build({ entryPoints: [path.join(__dirname, 'client/main.tsx')], bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } });
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://prime.test/', runScripts: 'outside-only' });
   let enrollment = { version: 1, propertyId: 'cmomyua8b0001rv1dvl6xjr6g', revision: 0, participation: 'ACTIVE', benefitDraft: { nightlyDiscountPercent: 0, earlyCheckInRequest: false, lateCheckoutRequest: false, personalNfc: false }, benefitsDraftOnly: true, updatedAt: null, updatedBy: null };
@@ -75,7 +75,7 @@ test('founder enrollment UI saves explicit drafts, distinguishes saved status an
       const input = JSON.parse(options.body); assert.equal(input.confirmPilotOnly, true);
       assert.deepEqual(Object.keys(input).sort(), ['benefitDraft', 'confirmPilotOnly', 'expectedRevision', 'participation']);
       if (input.expectedRevision !== enrollment.revision) return { ok: false, status: 409, json: async () => ({ error: 'ENROLLMENT_CHANGED' }) };
-      writes++; enrollment = { ...enrollment, participation: input.participation, benefitDraft: input.benefitDraft, revision: enrollment.revision + 1, updatedBy: 'prime-pilot-founder', updatedAt: '2026-10-27T12:00:00Z' };
+      writes++; enrollment = { ...enrollment, version: 2, participation: input.participation, benefitDraft: input.benefitDraft, revision: enrollment.revision + 1, updatedBy: 'prime-pilot-founder', updatedAt: '2026-10-27T12:00:00Z' };
     }
     return { ok: true, json: async () => ({ enrollment: JSON.parse(JSON.stringify(enrollment)) }) };
   };
@@ -88,20 +88,41 @@ test('founder enrollment UI saves explicit drafts, distinguishes saved status an
     dom.window.eval(bundle.outputFiles[0].text); await wait(() => button('Anfitrión · Demo'));
     button('Anfitrión · Demo').click(); await wait(() => dom.window.document.getElementById('prime-discount-draft'));
     assert.ok(text().includes('Activa en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
-    select('PAUSED');
     const discount = dom.window.document.getElementById('prime-discount-draft');
+    assert.equal(discount.min, '5'); assert.equal(discount.max, '20');
+    assert.ok(text().includes('no asignaremos un descuento automáticamente'));
+    for (const invalid of ['', '0', '4.99', '20.01']) {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(discount, invalid);
+      discount.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      await wait(() => !dom.window.document.querySelector('.prime-host-ack input').checked);
+      check('Entiendo que estoy configurando');
+      await wait(() => dom.window.document.querySelector('.prime-host-ack input').checked);
+      assert.ok(button('Guardar configuración de Demo').disabled);
+      discount.closest('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      assert.equal(writes, 0);
+    }
+    select('PAUSED');
+    await wait(() => discount.disabled && !dom.window.document.querySelector('.prime-host-ack input').checked);
+    check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
+    button('Guardar configuración de Demo').click(); await wait(() => writes === 1 && text().includes('Configuración guardada.'));
+    assert.equal(enrollment.benefitDraft.nightlyDiscountPercent, null); assert.equal(discount.value, '');
+    assert.equal(enrollment.participation, 'PAUSED'); assert.equal(enrollment.version, 2);
+    select('ACTIVE'); await wait(() => !discount.disabled);
+    check('Entiendo que estoy configurando'); await wait(() => dom.window.document.querySelector('.prime-host-ack input').checked);
+    assert.ok(button('Guardar configuración de Demo').disabled);
     Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(discount, '10'); discount.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    await wait(() => !discount.hasAttribute('aria-invalid'));
     check('Solicitud de entrada temprana');
-    assert.ok(text().includes('Activa en el buscador piloto')); // Pending edits do not claim already saved.
+    assert.ok(text().includes('Pausada en el buscador piloto')); // Pending edits do not claim already saved.
     check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
     button('Guardar configuración de Demo').click(); await wait(() => text().includes('Configuración guardada.'));
-    assert.equal(writes, 1); assert.equal(enrollment.participation, 'PAUSED'); assert.equal(enrollment.benefitDraft.nightlyDiscountPercent, 10); assert.equal(enrollment.benefitDraft.earlyCheckInRequest, true);
-    assert.ok(text().includes('Pausada en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
-    enrollment = { ...enrollment, revision: 2, participation: 'ACTIVE', benefitDraft: { ...enrollment.benefitDraft, nightlyDiscountPercent: 30 } };
-    select('ACTIVE'); check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
+    assert.equal(writes, 2); assert.equal(enrollment.participation, 'ACTIVE'); assert.equal(enrollment.benefitDraft.nightlyDiscountPercent, 10); assert.equal(enrollment.benefitDraft.earlyCheckInRequest, true);
+    assert.ok(text().includes('Activa en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
+    enrollment = { ...enrollment, revision: 3, participation: 'ACTIVE', benefitDraft: { ...enrollment.benefitDraft, nightlyDiscountPercent: 15 } };
+    select('PAUSED'); check('Entiendo que estoy configurando'); await wait(() => !button('Guardar configuración de Demo').disabled);
     button('Guardar configuración de Demo').click(); await wait(() => text().includes('La configuración cambió'));
-    assert.equal(writes, 1); assert.ok(button('Guardar configuración de Demo').disabled);
-    button('Recargar configuración').click(); await wait(() => dom.window.document.getElementById('prime-discount-draft')?.value === '30');
+    assert.equal(writes, 2); assert.ok(button('Guardar configuración de Demo').disabled);
+    button('Recargar configuración').click(); await wait(() => dom.window.document.getElementById('prime-discount-draft')?.value === '15');
     assert.ok(text().includes('Activa en el buscador piloto')); assert.ok(button('Guardar configuración de Demo').disabled);
     button('English').click(); await wait(() => text().includes('Proposed benefits'));
     assert.ok(text().includes('Draft'));
