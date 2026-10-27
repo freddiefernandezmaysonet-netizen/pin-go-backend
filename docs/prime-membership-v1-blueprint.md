@@ -16,7 +16,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Concepto | Decisión del fundador |
 | --- | --- |
 | Plan anual | Confirmado: USD 89.99 por año, cobrados como importe anual. |
-| Posible plan mensual | USD 9.99 al mes continúa como propuesta anterior. Falta definir si también se ofrecerá junto al anual; no se considera confirmado por la aprobación del precio anual. |
+| Plan mensual | Confirmado: USD 9.99 al mes. Se ofrecen ambos planes, mensual y anual. |
 | Canales de compra | Página de reservas de cualquier anfitrión o directamente en pin-ngo.com. |
 | Comisión por captación | El anfitrión recibe el 40% de los pagos de la membresía originada en la página de su propiedad, incluyendo las renovaciones pagadas mientras siga activa. La atribución y el historial se registran por propiedad; el calendario de liquidación sigue pendiente. |
 | Gestión del anfitrión | Todo se gestiona por propiedad: participación, descuento, beneficios, membresías referidas y comisiones. |
@@ -82,13 +82,13 @@ El fundador confirmó la cancelación sin permanencia mínima, la conservación 
 | Situación | Comportamiento | Estado de diseño |
 | --- | --- | --- |
 | Primer pago confirmado | Enviar la bienvenida y permitir completar el registro. | Confirmado. |
-| Membresía vigente | Mostrar fecha de próxima renovación y beneficios disponibles. Para el plan anual, USD 89.99 por período anual; renovación automática con condiciones mostradas antes de comprar. | Precio anual confirmado; recorrido operativo propuesto. |
+| Membresía vigente | Mostrar el plan elegido, la fecha de próxima renovación y los beneficios disponibles. USD 9.99 por período mensual o USD 89.99 por período anual; renovación automática con condiciones mostradas antes de comprar. | Ambos planes y precios confirmados; recorrido operativo propuesto. |
 | El miembro cancela la renovación | Permitir cancelación sin permanencia mínima; conservar beneficios hasta terminar el período ya pagado. Mostrar la fecha exacta de finalización. | Regla comercial confirmada. |
 | Falla una renovación | Avisar y permitir actualizar el método de pago. Respetar el período previamente pagado; al vencer, suspender beneficios para nuevas reservas. Reintentos y cualquier período de gracia quedan por definir. | Recorrido de recuperación propuesto. |
 | La membresía vence | Mantener acceso a cuenta, recibos, viajes existentes y reactivación; restringir nuevos beneficios Prime hasta un nuevo pago confirmado. | Recorrido de cuenta propuesto; los viajes confirmados están protegidos por la regla siguiente. |
 | Ya existen reservaciones confirmadas | Conservar el precio aceptado y el acceso correspondiente a esas estancias, sin cancelarlas ni retirar su acceso por cancelar la renovación de Prime. Cambios posteriores y nuevas reservas requieren sus propias validaciones. | Regla comercial confirmada. |
 
-Cancelar la próxima renovación de Prime conserva las reservaciones confirmadas. Para el plan anual, los beneficios continúan hasta terminar el año ya pagado; esta regla no define por sí sola un reembolso proporcional. La primera tarjeta y su envío incluidos no imponen permanencia mínima. La comisión del anfitrión sigue vinculada a pagos de membresía efectivamente confirmados; los ajustes por reembolsos y disputas continúan pendientes.
+Cancelar la próxima renovación de Prime conserva las reservaciones confirmadas. Los beneficios continúan hasta terminar el mes o el año ya pagado, según el plan; esta regla no define por sí sola un reembolso proporcional. La primera tarjeta y su envío incluidos no imponen permanencia mínima. La comisión del anfitrión sigue vinculada a pagos de membresía efectivamente confirmados; los ajustes por reembolsos y disputas continúan pendientes.
 
 Al implementar, las condiciones aceptadas de una reservación deberán conservarse para respetar su precio y acceso aunque la membresía venza antes o durante la estancia. Una comprobación genérica de «membresía vigente ahora» no debe retirar ese derecho ya adquirido. Siguen aplicando los controles propios de la reservación, la identidad, la tarjeta y el horario autorizado. El código local preliminar de condición de pago deberá alinearse con esta regla antes de cualquier integración con accesos.
 
@@ -101,7 +101,7 @@ El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y e
 ## Decisiones pendientes, en orden de diseño
 
 1. **Entrega de la tarjeta:** definir destinos cubiertos y logística de entrega. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
-2. **Modalidades adicionales:** el plan anual de USD 89.99 ya está confirmado. Definir si también se ofrecerá la modalidad mensual propuesta de USD 9.99.
+2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Queda por definir cómo cambiar entre modalidades, cuándo se hace efectivo el cambio y si se aplica algún prorrateo.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
 5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
@@ -111,7 +111,7 @@ Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío d
 
 ## Compra desde la página de reservas: regla confirmada y presentación propuesta
 
-Están confirmadas la compra de Prime desde páginas de reserva y la aplicación del descuento a la misma reserva en la que se adquiere la membresía, con el pago de Prime confirmado. El plan anual tiene un precio definido de USD 89.99. La presentación y coordinación técnica siguientes concretan esa regla para su implementación futura.
+Están confirmadas la compra de Prime desde páginas de reserva y la aplicación del descuento a la misma reserva en la que se adquiere la membresía, con el pago de Prime confirmado. El huésped puede elegir entre USD 9.99 al mes y USD 89.99 al año. La presentación y coordinación técnica siguientes concretan esa regla para su implementación futura.
 
 ### Presentación al huésped
 
@@ -120,7 +120,7 @@ En una propiedad participante, después de seleccionar fechas y antes de confirm
 - Precio regular de la estancia, calculado por el servidor.
 - Porcentaje Prime configurado en esa propiedad y descuento sobre el subtotal de noches.
 - Precio de la estancia con Prime, con limpieza, cargos e impuestos desglosados.
-- Precio de la membresía, separado del importe de la reservación: USD 89.99 por el plan anual, con las condiciones de renovación/cancelación.
+- Selector de plan y precio de la membresía, separado del importe de la reservación: USD 9.99 por el plan mensual o USD 89.99 por el plan anual, con las condiciones de renovación/cancelación.
 - Importe a pagar hoy y comparación con la alternativa regular, usando cotizaciones completas y actuales.
 
 Recorridos propuestos:
@@ -132,9 +132,14 @@ Recorridos propuestos:
 | Cliente que no elige Prime | Continúa con la cotización regular. |
 | Cuenta Prime existente sin vigencia | Se verifica la cuenta y se ofrece reactivarla, conservando su historial; la reactivación y las comisiones asociadas requieren sus reglas pendientes. |
 
-Ejemplo ilustrativo con el plan anual confirmado, sin impuestos ni otros cargos: tres noches de USD 150 suman USD 450 de alojamiento; 10% Prime descuenta USD 45; el alojamiento con Prime queda en USD 405 y, al añadir la anualidad de USD 89.99, suma USD 494.99. En este ejemplo el cliente paga USD 44.99 más hoy y adquiere un año de membresía; no existe un ahorro neto inmediato. Los cargos y los impuestos del caso real deben incluirse en las cotizaciones antes de mostrar cualquier comparación total.
+Ejemplo ilustrativo, sin impuestos ni otros cargos: tres noches de USD 150 suman USD 450 de alojamiento; 10% Prime descuenta USD 45; el alojamiento con Prime queda en USD 405.
 
-La pantalla debe mostrar el coste completo de USD 89.99 al comprar el plan anual. Si el precio de la membresía supera el descuento inmediato, debe mostrar los importes reales y permitir elegir; no debe afirmar que siempre se ahorra dinero en esa compra. La propuesta anterior de USD 9.99 mensuales sigue pendiente de definición como modalidad adicional.
+| Opción | Alojamiento | Membresía a pagar hoy | Total ilustrativo hoy | Comparación con USD 450 sin Prime |
+| --- | --- | --- | --- | --- |
+| Mensual | USD 405.00 | USD 9.99 | USD 414.99 | USD 35.01 menos hoy; incluye un mes de membresía. |
+| Anual | USD 405.00 | USD 89.99 | USD 494.99 | USD 44.99 más hoy; incluye un año de membresía. |
+
+Los cargos y los impuestos del caso real deben incluirse en las cotizaciones antes de mostrar cualquier comparación total. La pantalla debe mostrar el coste completo del plan elegido: USD 9.99 para el mes o USD 89.99 para el año. Si el precio de la membresía supera el descuento inmediato, debe mostrar los importes reales y permitir elegir; no debe afirmar que siempre se ahorra dinero en esa compra. Comparando únicamente cuotas de membresía, doce pagos mensuales suman USD 119.88: el plan anual cuesta USD 29.89 menos, cobrados como una anualidad de USD 89.99.
 
 ### Coordinación propuesta del recorrido
 
@@ -247,7 +252,7 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 
 Primera entrega propuesta: una búsqueda completa en un entorno de prueba con un miembro y propiedades explícitamente habilitadas. El mecanismo NFC se conecta después de validar el vínculo miembro–reserva; no se activa por una búsqueda ni por una cotización.
 
-Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. La posible modalidad mensual, las reglas de liquidación, los destinos y la logística de entrega, y los beneficios adicionales siguen pendientes. El plan anual de USD 89.99, el descuento obligatorio aplicable desde la misma reserva, la comisión recurrente, la primera tarjeta y su envío incluidos, y el reemplazo por extravío de USD 5 ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
+Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. Los cambios entre planes, las reglas de liquidación, los destinos y la logística de entrega, y los beneficios adicionales siguen pendientes. Los planes de USD 9.99 al mes y USD 89.99 al año, el descuento obligatorio aplicable desde la misma reserva, la comisión recurrente, la primera tarjeta y su envío incluidos, y el reemplazo por extravío de USD 5 ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
 
 ## Contrato técnico propuesto
 
