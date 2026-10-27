@@ -21,7 +21,16 @@
 
 ## Pending
 
-- Authenticated browser visual review, mobile visual review, and the founder's first manual test. The automated React interaction test is not real-device certification.
+- Authenticated browser visual review and mobile visual review. The founder confirmed the initial pilot test passed before this conversational update. The automated React interaction test is not real-device certification.
 - Prime permanent accounts, host opt-in, commercial benefits/prices, booking checkout, member trip linkage, and automatic NFC reservation grants are not part of this pilot.
 
 Production `OPENAI_API_KEY`, public booking settings, production API routes, workers, existing reservations, payments, and access grants were not changed.
+
+## Conversational update — October 27
+
+- Replaced the single search response with visible user/Pin AI turns, follow-up messages, a new-trip reset, and collapsed editable trip details. The last 12 turns provide context; current criteria survive across replies. History resets on reload and is not persisted to the server.
+- Separate typed interpretation and grounded narration use the dedicated Prime model/key. Replies receive only allowlisted facts, actual search outcomes and exclusion reasons. The model never controls booking, payment or access tools. Unknown required features remain hard requirements; beach proximity is not treated as beach access.
+- Nine API/search test groups and one React interaction test passed. Coverage includes bounded history, conversational follow-ups, no implicit relaxation of private-pool requirements, overlapping exclusion diagnostics, no AI calls for manual filters, and keeping a real quote when narration fails.
+- API/test and client strict TypeScript checks and the Vite production build passed.
+- Real model smoke test: a Puerto Rico request for two people with private pool/beach proximity retained both requirements when the next message supplied only November 6–9 dates. The generated answer requested dates and identified beach proximity as unconfirmed. This model smoke test used an empty synthetic catalog, not a live availability claim.
+- Deployment and live multi-turn checks pending at this commit.

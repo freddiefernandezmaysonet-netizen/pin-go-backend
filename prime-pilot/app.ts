@@ -3,11 +3,12 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
-import { criteriaSchema, emptyCriteria, interpret, searchCatalog, validateStay } from './search.js';
+import { criteriaSchema, emptyCriteria, historySchema, interpret, composeReply, fallbackReply, eligible, searchCatalog, validateStay, type ConversationFacts } from './search.js';
 
-export function createPilotApp(options: { dataDir: string; bootstrapHash?: string; production: boolean; catalog: Parameters<typeof searchCatalog>[1]; interpret?: typeof interpret }) {
+export function createPilotApp(options: { dataDir: string; bootstrapHash?: string; production: boolean; catalog: Parameters<typeof searchCatalog>[1]; interpret?: typeof interpret; composeReply?: typeof composeReply }) {
 const { dataDir, catalog } = options;
 const interpretCriteria = options.interpret || interpret;
+const replyToTraveler = options.composeReply || composeReply;
 const configPath = resolve(dataDir, 'config.json');
 mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 const configSchema = z.object({ PRIME_OPENAI_API_KEY: z.string().min(40).max(500), invitationHash: z.string().length(64), sessionSecret: z.string().length(64), expiresAt: z.number() });
@@ -19,7 +20,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Puerto
 const app = express();
 app.disable('x-powered-by');
 app.use((_req, res, next) => { res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'" }); next(); });
-app.use(express.json({ limit: '12kb' }));
+app.use(express.json({ limit: '96kb' }));
 app.get('/health', (_req, res) => res.json({ ok: true, configured: !!config, pilot: true }));
 // One-use provisioning: the bootstrap bearer is transferred directly over HTTPS by the local helper.
 // The OpenAI key never appears in source, URLs, logs, connector arguments, or browser storage.
@@ -61,7 +62,7 @@ app.use('/api', (req, res, next) => {
 });
 app.delete('/api/session', (_req, res) => { res.clearCookie('prime_session', { path: '/api' }); res.json({ ok: true }); });
 app.get('/api/member', (_req, res) => res.json({ name: 'Freddie', status: 'PILOT', expiresAt: config!.expiresAt, cardStatus: 'NFC_PILOT_VERIFIED', activeAccesses: 0, trips: [] }));
-const requestSchema = z.object({ message: z.string().trim().min(1).max(1600).optional(), criteria: criteriaSchema.default(emptyCriteria), language: z.enum(['es', 'en']).default('es') }).strict();
+const requestSchema = z.object({ message: z.string().trim().min(1).max(1600).optional(), criteria: criteriaSchema.default(emptyCriteria), history: historySchema.default([]), language: z.enum(['es', 'en']).default('es') }).strict();
 let busy = false;
 app.post('/api/search', async (req, res) => {
   const parsed = requestSchema.safeParse(req.body);
@@ -70,20 +71,32 @@ app.post('/api/search', async (req, res) => {
   busy = true;
   try {
     let { criteria } = parsed.data;
+    const { message, history, language } = parsed.data;
     let clarification: string | null = null;
-    if (parsed.data.message) {
+    let intent: 'search' | 'question' | 'chat' = 'search';
+    if (message) {
       const usagePath = resolve(dataDir, 'usage.json');
       const usage = existsSync(usagePath) ? JSON.parse(readFileSync(usagePath, 'utf8')) : {};
       const count = usage.day === today() ? Number(usage.count) : 0;
       if (!Number.isFinite(count) || count >= 100) return void res.status(429).json({ error: 'PILOT_DAILY_LIMIT' });
       writeFileSync(usagePath + '.tmp', JSON.stringify({ day: today(), count: count + 1 }), { mode: 0o600 });
       renameSync(usagePath + '.tmp', usagePath);
-      ({ criteria, clarification } = await interpretCriteria(parsed.data.message, criteria, config!.PRIME_OPENAI_API_KEY, parsed.data.language, today()));
+      ({ criteria, clarification, intent } = await interpretCriteria(message, criteria, config!.PRIME_OPENAI_API_KEY, language, today(), history));
     }
     const missing = validateStay(criteria, today());
-    if (missing.length || clarification || criteria.unsupported.length) return void res.json({ criteria, clarification, missing, results: [], failed: 0, status: 'NEEDS_DETAILS' });
-    const results = await searchCatalog(criteria, catalog);
-    res.json({ criteria, clarification: null, missing: [], ...results, status: results.failed ? 'PARTIAL_ERROR' : results.results.length ? 'RESULTS' : 'NO_MATCHES' });
+    const properties = (await catalog.catalog()).filter(eligible);
+    let facts: ConversationFacts = { criteria, clarification, missing, results: [], failed: 0, status: intent === 'chat' ? 'CHAT' : intent === 'question' ? 'QUESTION' : 'NEEDS_DETAILS' };
+    if (intent === 'search' && !missing.length && !clarification) {
+      const found = await searchCatalog(criteria, { ...catalog, catalog: async () => properties });
+      facts = { ...facts, ...found, status: found.failed ? 'PARTIAL_ERROR' : found.results.length ? 'RESULTS' : 'NO_MATCHES' };
+    }
+    let reply = fallbackReply(facts, language);
+    let replyFallback = false;
+    if (message) {
+      try { reply = await replyToTraveler(message, history, facts, properties, config!.PRIME_OPENAI_API_KEY, language); }
+      catch { replyFallback = true; } // A narration failure must not discard a verified quote.
+    }
+    res.json({ ...facts, reply, replyFallback });
   } catch (error) {
     // Never log request bodies, provider payloads, reservation details, or credentials.
     console.error('[prime-pilot]', error instanceof Error && error.message === 'AI_UNAVAILABLE' ? 'AI_UNAVAILABLE' : 'SEARCH_UNAVAILABLE');

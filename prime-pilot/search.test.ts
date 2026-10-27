@@ -38,3 +38,17 @@ test('upstream failures and invalid price data never become available results', 
   assert.equal((await searchCatalog(criteria, { ...deps, quote: async () => ({ ...quote, currency: 'eur' }) })).failed, 1);
   assert.equal((await searchCatalog(criteria, { ...deps, quote: async () => ({ ...quote, totalAmountCents: 1 }) })).failed, 1);
 });
+test('no-match diagnostics distinguish unverified preferences, unavailable dates and budget', async () => {
+  let availabilityCalls = 0;
+  const deps = { catalog: async () => [property, { ...property, id: 'production-property', name: 'Private listing' }], available: async () => { availabilityCalls++; return true; }, quote: async () => quote };
+  const required = { ...criteria, preferences: ['private_pool'] as typeof criteria.preferences, unsupported: ['a 5 minutos de la playa'] };
+  const unverified = await searchCatalog(required, deps);
+  assert.equal(unverified.diagnostics.catalogCount, 1);
+  assert.deepEqual(unverified.diagnostics.excludedBy, { 'unverified:private_pool': 1, unsupported_requirements: 1 });
+  assert.equal(availabilityCalls, 0);
+  assert.deepEqual(required.unsupported, ['a 5 minutos de la playa']);
+  const budget = await searchCatalog({ ...criteria, maxTotal: 350 }, deps);
+  assert.equal(budget.diagnostics.overBudget, 1); assert.equal(budget.diagnostics.unavailable, 0);
+  const unavailable = await searchCatalog(criteria, { ...deps, available: async () => false });
+  assert.equal(unavailable.diagnostics.unavailable, 1); assert.equal(unavailable.diagnostics.overBudget, 0);
+});

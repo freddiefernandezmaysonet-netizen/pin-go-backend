@@ -6,3 +6,20 @@
 @media(prefers-reduced-motion:reduce){.prime-pulse{animation:none}}
 
 .prime-topbar-actions{display:flex;gap:15px;align-items:center}.prime-topbar-actions .prime-icon-button{margin:0}
+
+.prime-conversation{display:flex;flex-direction:column;gap:16px;max-height:440px;overflow-y:auto;overscroll-behavior:contain;margin:22px 0;padding:0 8px 4px 0;scrollbar-width:thin}
+.prime-turn{max-width:88%;border-radius:16px;padding:14px 18px;overflow-wrap:anywhere;flex-shrink:0}
+.prime-turn>span{font-size:10px;font-weight:650;letter-spacing:.2px;color:#4977ad}
+.prime-turn p{white-space:pre-wrap;font-size:14px;line-height:1.65;margin:6px 0 0;color:#294263}
+.prime-turn-assistant{align-self:flex-start;background:#f0f5fc;border-bottom-left-radius:4px}
+.prime-turn-user{align-self:flex-end;background:#0b5bda;border-bottom-right-radius:4px}
+.prime-turn-user p,.prime-turn-user>span{color:white}
+.prime-turn-user>span{opacity:.75}
+.prime-search-box form{border-top:1px solid #e5edf7;padding-top:12px}
+.prime-search-box textarea{min-height:70px}
+.prime-new-conversation{margin-left:auto;color:#1e64c6;font-size:11px;white-space:nowrap}
+.prime-thinking{display:flex;gap:9px;align-items:center;color:#4977ad}
+.prime-thinking svg{animation:prime-pulse 1.5s infinite;flex-shrink:0}
+.prime-filter-section{border-top:1px solid #e6edf7;padding-top:18px}
+@media(max-width:640px){.prime-conversation{max-height:52dvh;margin:18px 0;gap:12px}.prime-turn{max-width:94%;padding:12px 14px}.prime-turn p{font-size:14px}.prime-search-box textarea{min-height:80px}.prime-ai-label>span:last-of-type{display:none}.prime-new-conversation{font-size:10px}.prime-thinking>span{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.prime-thinking svg{animation:none}}
