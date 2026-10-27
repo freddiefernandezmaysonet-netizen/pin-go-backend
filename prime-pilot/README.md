@@ -33,6 +33,7 @@ npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --modul
 npm ci --prefix prime-pilot
 npm run typecheck --prefix prime-pilot
 npm run build --prefix prime-pilot
+npm test --prefix prime-pilot
 ```
 
 Behavior tests cover allowlist enforcement, unavailable inventory, real total budget calculation, children/capacity/NFC/preferences, invalid dates and upstream failures. HTTP tests exercise one-use setup, unauthenticated reads, forged sessions, cross-origin requests, persistent quota, cookie protections, and sign-out. Browser checks should cover desktop/mobile overflow, invitation login, missing criteria, results, editable filters, empty/error states, details dialog, Spanish/English, navigation, and sign-out. Use explicitly marked synthetic fixtures only for local UI tests; live API checks use the Demo property.

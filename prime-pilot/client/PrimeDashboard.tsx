@@ -44,6 +44,10 @@ export function PrimeDashboard() {
   }, []);
   useEffect(() => { document.documentElement.lang = lang; }, [lang]);
   useEffect(() => { if (detail) dialogRef.current?.showModal(); else dialogRef.current?.close(); }, [detail]);
+  async function signOut() {
+    try { await api('session', 'DELETE'); setMember(null); setAnswer(null); setCriteria(initial); }
+    catch { setError(t('No pudimos cerrar la sesión. Intenta otra vez.', 'Could not sign out. Try again.')); }
+  }
   async function login(e: FormEvent) {
     e.preventDefault(); setLoading(true); setLoginError(false);
     try { await api('session', 'POST', { invitation: invitation.trim() }); setMember(await api('member')); setInvitation(''); }
@@ -56,7 +60,7 @@ export function PrimeDashboard() {
     setBusy(true); setError(''); setAnswer(null);
     try {
       const result: Answer = await api('search', 'POST', { criteria, language: lang, ...(text ? { message: text } : {}) });
-      setCriteria(result.criteria); setAnswer(result); setMessage(''); if (text) setLastMessage(text);
+      setCriteria(result.criteria); setAnswer(result); setMessage(''); setLastMessage(text || '');
     } catch (e) {
       const code = e instanceof Error ? e.message : '';
       if (code === 'SESSION_REQUIRED') setMember(null);
@@ -71,8 +75,8 @@ export function PrimeDashboard() {
   return <div className="prime-app">
     <aside className="prime-sidebar"><Brand /><div className="prime-sidebar-label">{t('TU ESPACIO', 'YOUR SPACE')}</div><nav aria-label={t('Navegación de Prime', 'Prime navigation')}>
       {[['explore', Compass, t('Explorar', 'Explore')], ['trips', CalendarDays, t('Mis viajes', 'My trips')], ['card', CreditCard, t('Mi tarjeta Prime', 'My Prime card')]].map(([key, Icon, label]) => { const I = Icon as typeof Compass; return <button key={String(key)} className={page === key ? 'active' : ''} aria-current={page === key ? 'page' : undefined} onClick={() => setPage(key as typeof page)}><I size={19} />{String(label)}{page === key ? <span className="prime-nav-dot" /> : null}</button>; })}
-    </nav><div className="prime-sidebar-bottom"><div className="prime-avatar">F</div><div><strong>{member.name}</strong><small>{t('Miembro de prueba', 'Pilot member')}</small></div><button className="prime-icon-button" aria-label={t('Cerrar sesión', 'Sign out')} onClick={async () => { try { await api('session', 'DELETE'); setMember(null); setAnswer(null); setCriteria(initial); } catch { setError(t('No pudimos cerrar la sesión. Intenta otra vez.', 'Could not sign out. Try again.')); } }}><LogOut size={17} /></button></div></aside>
-    <div className="prime-content"><header className="prime-topbar"><span>Pin&Go <strong>Prime</strong><span className="prime-pilot-badge">{t('Vista de prueba', 'Pilot preview')}</span></span><button className="prime-language" onClick={() => setLang(l => l === 'es' ? 'en' : 'es')}><Globe2 size={16} />{lang === 'es' ? 'English' : 'Español'}</button></header>
+    </nav><div className="prime-sidebar-bottom"><div className="prime-avatar">F</div><div><strong>{member.name}</strong><small>{t('Miembro de prueba', 'Pilot member')}</small></div><button className="prime-icon-button" aria-label={t('Cerrar sesión', 'Sign out')} onClick={signOut}><LogOut size={17} /></button></div></aside>
+    <div className="prime-content"><header className="prime-topbar"><span>Pin&Go <strong>Prime</strong><span className="prime-pilot-badge">{t('Vista de prueba', 'Pilot preview')}</span></span><div className="prime-topbar-actions"><button className="prime-language" onClick={() => setLang(l => l === 'es' ? 'en' : 'es')}><Globe2 size={16} />{lang === 'es' ? 'English' : 'Español'}</button><button className="prime-icon-button" aria-label={t('Cerrar sesión', 'Sign out')} onClick={signOut}><LogOut size={16} /></button></div></header>
     <main className="prime-main">
       {page === 'explore' ? <>
         <div className="prime-welcome"><span className="prime-eyebrow">{t('HOLA, FREDDIE', 'HELLO, FREDDIE')} <span>✦</span></span><h1>{t('Tu próxima estancia', 'Your next stay')}<br /><em>{t('empieza con una idea.', 'starts with an idea.')}</em></h1><p>{t('Tú imaginas el viaje. Pin AI te ayuda a encontrarlo.', 'You imagine the trip. Pin AI helps you find it.')}</p></div>
