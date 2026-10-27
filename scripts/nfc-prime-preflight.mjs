@@ -4,8 +4,10 @@ export const DEMO_PROPERTY_ID = "cmomyua8b0001rv1dvl6xjr6g";
 const READ_PATHS = new Set([
   "/v3/identityCard/list",
   "/v3/gateway/listByLock",
+  "/v3/gateway/list",
   "/v3/lock/detail",
 ]);
+let phase = "configuration";
 
 export function checkedBase(value = "https://api.sciener.com") {
   const url = new URL(value);
@@ -50,26 +52,36 @@ export async function main(env = process.env) {
     return;
   }
   const base = checkedBase(env.TTLOCK_API_BASE);
+  phase = "database_connection";
   const { SQL } = await import("bun");
-  const sql = new SQL(env.DATABASE_URL, { max: 1, connectionTimeout: 10, idleTimeout: 5 });
+  const databaseUrl = new URL(env.DATABASE_URL);
+  // Prisma's schema option is not a PostgreSQL startup parameter.
+  const schema = databaseUrl.searchParams.get("schema");
+  if (schema && schema !== "public") throw new Error("UNSUPPORTED_DATABASE_SCHEMA");
+  databaseUrl.searchParams.delete("schema");
+  const sql = new SQL(databaseUrl.toString(), { max: 1, connectionTimeout: 10, idleTimeout: 5 });
   let snapshot;
   try {
     snapshot = await sql.begin(async tx => {
       await tx`SET TRANSACTION READ ONLY`;
       await tx`SET LOCAL statement_timeout = '10000ms'`;
+      phase = "demo_property";
       const [property] = await tx`
         SELECT id, name, "organizationId", "isTestProperty", status, timezone
         FROM "Property" WHERE id = ${DEMO_PROPERTY_ID}`;
       if (!property || property.status !== "ACTIVE") throw new Error("DEMO_NOT_ACTIVE");
+      phase = "demo_locks";
       const locks = await tx`
         SELECT l.id, l."ttlockLockId", l."displayName", l."ttlockLockName", l."isActive",
           g."ttlockGatewayId", g."isOnline" AS "gatewayOnlineCached", g."lastEventAt"
         FROM "Lock" l LEFT JOIN "TtlockGateway" g ON g.id = l."ttlockGatewayRecordId"
         WHERE l."propertyId" = ${DEMO_PROPERTY_ID} AND l."isActive" = true
         ORDER BY l."ttlockLockId" LIMIT 10`;
+      phase = "organization_auth";
       const [auth] = await tx`
         SELECT "accessToken", "expiresAt" FROM "TTLockAuth"
         WHERE "organizationId" = ${property.organizationId}`;
+      phase = "reservation_count";
       const [reservations] = await tx`
         SELECT count(*)::int AS "activeReservationsNext24h" FROM "Reservation"
         WHERE "propertyId" = ${DEMO_PROPERTY_ID} AND status = 'ACTIVE'
@@ -86,6 +98,16 @@ export async function main(env = process.env) {
     return;
   }
   const config = { base, clientId: env.TTLOCK_CLIENT_ID, accessToken: auth.accessToken };
+  phase = "ttlock_reads";
+  const gatewayStates = new Map();
+  for (let pageNo = 1; pageNo <= 10; pageNo++) {
+    const page = await providerRead(config, "/v3/gateway/list", {
+      pageNo: String(pageNo), pageSize: "100",
+    });
+    if (!Array.isArray(page.list)) throw new Error("INVALID_GATEWAY_LIST");
+    for (const gateway of page.list) gatewayStates.set(String(gateway.gatewayId), gateway.isOnline);
+    if (page.list.length < 100) break;
+  }
   for (const lock of locks) {
     const lockId = String(lock.ttlockLockId);
     const detail = await providerRead(config, "/v3/lock/detail", { lockId });
@@ -106,7 +128,7 @@ export async function main(env = process.env) {
       batteryPercent: detail.electricQuantity ?? null, featureValue: detail.featureValue ?? null,
       gatewayIdFromDetail: detail.gatewayId ?? null,
       gateways: gatewayList.map(g => ({ gatewayId: g.gatewayId, name: g.gatewayName ?? null,
-        isOnline: g.isOnline ?? null, rssi: g.rssi ?? null })),
+        isOnline: gatewayStates.get(String(g.gatewayId)) ?? null, rssi: g.rssi ?? null })),
       cardListComplete: complete, cardCount: cards.length, cards }));
   }
   console.log(JSON.stringify({ kind: "NFC_PRIME_PREFLIGHT", status: "READ_COMPLETE",
@@ -117,9 +139,17 @@ if (import.meta.main) {
   try { await main(); }
   catch (error) {
     const message = String(error?.message ?? "");
-    const safe = /^(UNSUPPORTED_TTLOCK_ORIGIN|READ_ONLY_ENDPOINT_REQUIRED|TTLOCK_AUTH_MISSING|TTLOCK_HTTP_\d+|TTLOCK_INVALID_JSON|TTLOCK_CODE_-?\d+|INVALID_CARD_LIST|DEMO_NOT_ACTIVE)$/.test(message)
+    const safe = /^(UNSUPPORTED_DATABASE_SCHEMA|UNSUPPORTED_TTLOCK_ORIGIN|READ_ONLY_ENDPOINT_REQUIRED|TTLOCK_AUTH_MISSING|TTLOCK_HTTP_\d+|TTLOCK_INVALID_JSON|TTLOCK_CODE_-?\d+|INVALID_CARD_LIST|INVALID_GATEWAY_LIST|DEMO_NOT_ACTIVE)$/.test(message)
       ? message : "PREFLIGHT_FAILED";
-    console.log(JSON.stringify({ kind: "NFC_PRIME_PREFLIGHT", status: safe, writes: 0 }));
+    const sqlState = /^[A-Z0-9_]{2,60}$/.test(String(error?.code ?? "")) ? error.code : null;
+    const missingColumn = message.match(/^column "([A-Za-z0-9_.]+)" does not exist$/)?.[1] ?? null;
+    const dbErrorHint = ["unrecognized configuration parameter", "password authentication failed",
+      "permission denied", "read-only transaction", "syntax error", "does not exist",
+      "cannot set transaction", "timeout"].find(hint => message.toLowerCase().includes(hint)) ?? null;
+    const serverCode = /^[A-Z0-9]{5}$/.test(String(error?.errno ?? "")) ? error.errno : null;
+    console.log(JSON.stringify({ kind: "NFC_PRIME_PREFLIGHT", status: safe, phase,
+      sqlState, serverCode, dbErrorHint, missingColumn,
+      errorType: error?.name === "TypeError" ? "TypeError" : "Error", writes: 0 }));
     process.exitCode = 1;
   }
 }
