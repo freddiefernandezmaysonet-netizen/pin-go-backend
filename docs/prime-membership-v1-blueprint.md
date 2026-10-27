@@ -18,7 +18,8 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Plan anual | Confirmado: USD 89.99 por año, cobrados como importe anual. |
 | Plan mensual | Confirmado: USD 9.99 al mes. Se ofrecen ambos planes, mensual y anual. |
 | Canales de compra | Página de reservas de cualquier anfitrión o directamente en pin-ngo.com. |
-| Comisión por captación | El anfitrión recibe el 40% de los pagos de la membresía originada en la página de su propiedad, incluyendo las renovaciones pagadas mientras siga activa. La atribución y el historial se registran por propiedad; el calendario de liquidación sigue pendiente. |
+| Comisión por captación | El anfitrión recibe el 40% de los pagos de la membresía originada en la página de su propiedad, incluyendo las renovaciones pagadas mientras siga activa. La atribución y el historial se registran por propiedad; la liquidación se integra con Stripe Connect. |
+| Medio de liquidación al anfitrión | Confirmado por el fundador: Stripe Connect, utilizando la cuenta conectada existente del anfitrión. El abono bancario sigue la configuración de pagos de esa cuenta y la disponibilidad de fondos. |
 | Gestión del anfitrión | Todo se gestiona por propiedad: participación, descuento, beneficios, membresías referidas y comisiones. |
 | Descuento obligatorio | Cada propiedad participante tiene su propio porcentaje, elegido por el anfitrión entre 5% y 20%. |
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
@@ -29,7 +30,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Cancelación de membresía | Sin permanencia mínima; conserva beneficios hasta terminar el período ya pagado. |
 | Reservaciones ya confirmadas | Conservan el precio acordado y el acceso correspondiente a la estancia aunque se cancele la renovación de Prime. |
 
-La venta de la membresía debe conservar la propiedad de origen y el anfitrión correspondiente para atribuir los pagos de membresía. Las comisiones recurrentes se registran en esa propiedad de origen. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones. La gestión por propiedad corresponde a las funciones del anfitrión; el miembro mantiene su cuenta Prime y su tarjeta personal reutilizable para viajar entre propiedades participantes.
+La venta de la membresía debe conservar la propiedad de origen y el anfitrión correspondiente para atribuir los pagos de membresía. Las comisiones recurrentes se registran en esa propiedad de origen y se liquidan mediante Stripe Connect. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni los detalles de integración del reparto recurrente en Connect. La gestión por propiedad corresponde a las funciones del anfitrión; el miembro mantiene su cuenta Prime y su tarjeta personal reutilizable para viajar entre propiedades participantes.
 
 Ejemplo ilustrativo del descuento: tres noches de USD 150 producen un subtotal de alojamiento de USD 450. Con 10% Prime, el descuento es USD 45 y el alojamiento queda en USD 405. Limpieza y otros conceptos se incorporan por separado. Este ejemplo no constituye una tarifa real ni fija un tratamiento fiscal.
 
@@ -171,7 +172,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 1. **Entrega de la tarjeta:** evaluar los costos de envío antes de decidir los destinos cubiertos y la logística, según indicó el fundador. Obtener origen del despacho, peso y dimensiones del envío y destinos de referencia para cotizar. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
-4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Definir calendario de liquidación, recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% ya está confirmado; los detalles nuevos son propuestas.
+4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Integrar el reparto recurrente con Stripe Connect, verificar la configuración de pagos de la cuenta conectada y definir recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% y el uso de Stripe Connect están confirmados; los detalles nuevos son propuestas.
 5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
@@ -251,7 +252,7 @@ Propuesta de presentación: una sección «Comisiones Prime» dentro de la propi
 - Importe generado, pendiente de liquidación y efectivamente pagado, según evidencia del sistema.
 - Ajustes identificados por separado cuando se definan las políticas de reembolso y disputa.
 
-Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada pago de membresía una sola vez, asociado a su propiedad de origen. Las consultas y escrituras deben validar que la propiedad seleccionada pertenece al anfitrión autenticado. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento, las reglas de redondeo y el calendario de liquidación siguen pendientes; el diseño de pantalla no los fija.
+Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada pago de membresía una sola vez, asociado a su propiedad de origen y conciliado con Stripe Connect. Las consultas y escrituras deben validar que la propiedad seleccionada pertenece al anfitrión autenticado. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento y las reglas de redondeo siguen propuestas; la configuración real de pagos de Connect debe verificarse durante la integración.
 
 ### Cálculo y registro de comisiones: propuesta
 
@@ -266,7 +267,7 @@ Para pagos en USD, se propone redondear la comisión de cada pago al centavo má
 
 El importe restante no representa ganancia neta: aún debe cubrir procesamiento, tarjeta, empaque, envío y los demás costes que correspondan. Los ejemplos excluyen impuestos y presuponen el pago completo de la membresía. Cualquier descuento futuro sobre el precio de la propia membresía necesitaría sus reglas; el descuento Prime sobre alojamiento es un concepto separado.
 
-La comisión anual se genera una vez por cada anualidad efectivamente pagada; no genera doce comisiones mensuales. La comisión mensual se genera por cada mensualidad pagada. La fecha de generación y la fecha de liquidación al anfitrión son distintas; este documento todavía no establece el calendario de pago.
+La comisión anual se genera una vez por cada anualidad efectivamente pagada; no genera doce comisiones mensuales. La comisión mensual se genera por cada mensualidad pagada. Cada pago confirmado debe iniciar el registro y el reparto correspondiente mediante Stripe Connect. Se distinguen la generación de la comisión, su acreditación en la cuenta conectada y el pago bancario, cuyo calendario depende de la configuración de Stripe y de los fondos disponibles.
 
 ### Atribución y movimientos propuestos
 
@@ -286,17 +287,24 @@ Propuesta para reembolsos parciales: recalcular la comisión sobre la base de me
 
 Si la comisión ya fue liquidada, mostrar el ajuste pendiente de resolución. La forma de recuperar esos importes o compensarlos con pagos futuros sigue pendiente de acuerdo e implementación; esta propuesta no autoriza débitos automáticos al anfitrión.
 
-### Liquidación y presentación al anfitrión
+### Liquidación mediante Stripe Connect y presentación al anfitrión
+
+El fundador confirmó que las comisiones se manejan a través de Stripe Connect. El diseño reutiliza la cuenta conectada del anfitrión registrada en su organización y conserva por propiedad la atribución, el cálculo y la conciliación. La integración propuesta combina Stripe Billing para la membresía mensual/anual con Stripe Connect para distribuir la comisión del referido en el primer pago y en las renovaciones confirmadas.
+
+El reparto se automatizará como parte de la integración de Prime. Los identificadores del pago y de las operaciones de Connect deben permitir confirmar importes, destinatario y resultado sin duplicarlos ante reintentos. Si la cuenta conectada no puede recibir fondos, conservar el estado pendiente y mostrar la acción necesaria; registrar una comisión no equivale a haberla abonado.
 
 Por cada propiedad, mostrar comisiones generadas, ajustes, saldo pendiente de liquidación y pagos confirmados, con importe, moneda, período y referencia de origen. Las retenciones y fallos de pago se identifican por separado. La pantalla debe permitir conciliar el saldo: comisiones registradas más ajustes, menos liquidaciones confirmadas, separando cualquier importe retenido.
 
-La atribución se mantiene por propiedad aunque la cuenta de cobro existente sea de la organización. Si una liquidación agrupa varias propiedades, debe conservar su desglose para el anfitrión. Se debe distinguir la transferencia al saldo del anfitrión del abono bancario cuando se registren como etapas distintas; «Pagado al banco» requiere evidencia de esa etapa.
+La atribución se mantiene por propiedad aunque la cuenta de cobro existente sea de la organización. Si una liquidación agrupa varias propiedades, debe conservar su desglose para el anfitrión. La pantalla distingue la acreditación en Connect del pago bancario y refleja el último estado informado por Stripe, incluyendo fallos o correcciones posteriores.
 
-Quedan por definir la periodicidad y fecha de liquidación, los criterios para liberar fondos, cualquier mínimo o retención y la política para ajustes de comisiones ya pagadas. No se realizan transferencias ni se crean compromisos de fechas de pago con esta propuesta. La verificación de la integración deberá cubrir ambos planes, pagos repetidos, pagos fallidos, atribución por propiedad, reembolsos parciales y totales, disputas y liquidaciones fallidas.
+Se conservará la configuración de pagos de la cuenta Stripe Connect; cualquier modificación de ese calendario requiere una decisión específica. Quedan por validar la modalidad de cobro y reparto de Prime, las capacidades de la cuenta para recibir esos fondos, la disponibilidad del saldo y el tratamiento de reembolsos, disputas y comisiones ya pagadas. El uso de Connect no fija por sí solo quién asume las tarifas de procesamiento; la propuesta de que Pin&Go las cubra debe validarse con la modalidad elegida. La verificación de la integración deberá cubrir ambos planes, pagos repetidos, pagos fallidos, atribución por propiedad, reembolsos parciales y totales, disputas y liquidaciones fallidas.
+
+Referencias oficiales revisadas para este diseño: [suscripciones con Stripe Billing y Connect](https://docs.stripe.com/connect/subscriptions) y [calendario de pagos de cuentas conectadas](https://docs.stripe.com/connect/manage-payout-schedule). La documentación distingue la suscripción, la distribución de fondos y el calendario de pagos bancarios. Estas referencias sustentan el diseño; esta actualización no configura productos, suscripciones, transferencias ni pagos en Stripe.
 
 ### Base técnica revisada para ubicar estas funciones
 
 - Backend revisado: `af10a9d9191480d6b5b65f902abeb41859ece21a`. `Organization` ya contiene la asociación y el estado de Stripe Connect; `src/routes/dashboard-payouts.routes.ts` obtiene la organización de la sesión autenticada para las consultas de pagos del anfitrión.
+- `src/services/stripe-connect.service.ts` revisa la cuenta conectada y su estado para Direct Booking. `src/services/direct-booking-stripe-charge-mode.service.ts` usa cargos directos en la cuenta conectada para las reservas. Prime requiere validar su propia modalidad de suscripción y reparto dentro de Connect; el flujo de reservas existente no incorpora automáticamente la comisión de membresía.
 - Esa asociación de pagos existente por organización no cambia el alcance acordado para Prime: configuración, atribución y consulta de comisiones por propiedad. El diseño no implica crear una nueva cuenta de Stripe por cada alojamiento.
 - Copia local del dashboard revisada: `701135729c34296e817060dc7fddf7c608fc2ae0`. Existen pantallas de configuración de propiedades, `src/components/payouts/HostPayoutsExperience.tsx` y contratos de estado de pagos en `src/api/payouts.ts`.
 - Esta es evidencia de estructura existente. La contabilidad de comisiones recurrentes de Prime y su liquidación todavía requieren una integración específica y validación; la revisión no creó cuentas, transferencias ni cambios en Stripe.
@@ -405,7 +413,7 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 | Área | Entrega propuesta |
 | --- | --- |
 | Miembro | Compra, pago confirmado, email de bienvenida, creación de contraseña y registro con dirección de envío. Cuenta persistente, membresía y vínculo verificado con sus reservas. Reutilización de cuenta en Guest como objetivo, previa revisión de su identidad actual. |
-| Host | Afiliación y descuento obligatorio de 5–20% sobre alojamiento por noche; comisión recurrente de 40% por membresías originadas en su página. Liquidación pendiente de diseño. |
+| Host | Afiliación y descuento obligatorio de 5–20% sobre alojamiento por noche; comisión recurrente de 40% por membresías originadas en su página, mediante la cuenta Stripe Connect existente. Integración de Prime y conciliación por propiedad pendientes de implementación. |
 | Buscar con Pin AI | Conversación en español/inglés, criterios editables, resultados, comparación y selección. |
 | Reservar | Reutilizar cotización y checkout de Direct Booking, conservando validaciones. |
 | Mis viajes | Próximas estancias, historial y acceso verificado al portal de cada reserva. |
