@@ -77,6 +77,23 @@ Detalles técnicos propuestos para implementar el alta, aún sin activar:
 
 La cuenta, la suscripción, el envío de la tarjeta y los permisos de cada estancia tendrán estados separados para mostrar al miembro qué está realmente listo.
 
+### Recuperación de pago y registro: recorrido propuesto
+
+La compra debe poder recuperarse conservando la misma identidad, suscripción y pago. El requisito de membresía pagada antes del alta sigue vigente. La siguiente presentación concreta los fallos y las acciones que puede realizar el miembro; todavía requiere implementación.
+
+| Situación | Qué muestra Prime | Cómo continúa el cliente |
+| --- | --- | --- |
+| Primer pago rechazado o sin completar | «Tu pago no se ha completado». | Volver al pago existente y corregir el método o completar la acción solicitada por Stripe. No se concede acceso Prime por iniciar el checkout. |
+| El navegador regresa antes de confirmar el pago | «Estamos confirmando tu pago». | Consultar el estado verificado del servidor; no solicitar otra compra mientras se resuelve la operación existente. |
+| Pago confirmado, correo de bienvenida no recibido | «Membresía pagada · completa tu registro». | Reenviar el enlace al correo asociado a esa compra, con controles de frecuencia. El reenvío no cobra otra vez ni crea otra membresía. |
+| Enlace de bienvenida vencido | «Solicita un nuevo enlace para continuar». | Emitir otro enlace de un solo uso al correo asociado y retirar los enlaces de activación anteriores. |
+| Registro interrumpido | «Completa tu perfil y dirección». | Retomar el registro con acceso verificado y conservar los datos ya guardados. |
+| Cuenta Prime existente | Acceso o recuperación de la cuenta correspondiente. | Conservar viajes e historial; comprobar la suscripción existente antes de ofrecer otra compra. |
+
+Los mensajes sobre una compra concreta solo se muestran con un contexto de compra o cuenta verificado. Un formulario público de reenvío devuelve una respuesta neutral; escribir un correo no permite consultar pagos ni entrar a esa cuenta. Corregir el correo de una compra exige verificar la titularidad antes de cambiar el destino del enlace.
+
+El correo de bienvenida es responsabilidad del flujo de alta de Pin&Go. El recibo de Stripe y la bienvenida cumplen funciones diferentes. El envío y sus reintentos se registran para recuperar fallos de entrega; una nueva notificación del mismo pago no debe provocar otra bienvenida automática, cuenta, tarjeta ni comisión.
+
 ## Ciclo de suscripción: decisiones confirmadas y detalles propuestos
 
 El fundador confirmó la cancelación sin permanencia mínima, la conservación de beneficios hasta terminar el período pagado y el respeto al precio y acceso de las reservaciones ya confirmadas. La tabla distingue esas decisiones de los detalles operativos todavía propuestos.
@@ -93,6 +110,32 @@ El fundador confirmó la cancelación sin permanencia mínima, la conservación 
 Cancelar la próxima renovación de Prime conserva las reservaciones confirmadas. Los beneficios continúan hasta terminar el mes o el año ya pagado, según el plan; esta regla no define por sí sola un reembolso proporcional. La primera tarjeta y su envío incluidos no imponen permanencia mínima. La comisión del anfitrión sigue vinculada a pagos de membresía efectivamente confirmados; los ajustes por reembolsos y disputas continúan pendientes.
 
 Al implementar, las condiciones aceptadas de una reservación deberán conservarse para respetar su precio y acceso aunque la membresía venza antes o durante la estancia. Una comprobación genérica de «membresía vigente ahora» no debe retirar ese derecho ya adquirido. Siguen aplicando los controles propios de la reservación, la identidad, la tarjeta y el horario autorizado. El código local preliminar de condición de pago deberá alinearse con esta regla antes de cualquier integración con accesos.
+
+### Renovación fallida y recuperación mediante Stripe: propuesta
+
+Desde «Mi cuenta → Membresía», mostrar el estado del pago, el importe pendiente, el período al que corresponde y «Actualizar método de pago» o «Completar pago», según la acción disponible. La sesión de gestión de facturación debe corresponder al miembro autenticado y a su cliente de Stripe en el contexto de cuenta correcto.
+
+Stripe Billing puede gestionar los reintentos de cobro y proporcionar un portal para actualizar el método de pago. La integración de Prime debe consultar el resultado real y la acción requerida, y reflejarlos en la cuenta. El calendario y el resultado al agotar los reintentos deben validarse antes de activar Prime; no se modifica la configuración global usada por otras suscripciones con este diseño. Una actualización del método de pago debe afectar al que utilizará realmente la suscripción.
+
+Propuesta de comportamiento de Prime:
+
+1. Registrar el fallo y presentar una acción de recuperación. Proponer un aviso por email con acceso al recorrido verificado de la cuenta, evitando mensajes duplicados por el mismo evento.
+2. Respetar los beneficios hasta la fecha ya pagada. Al vencer ese período, restringir los beneficios para nuevas reservas hasta que haya un pago confirmado; no se añade un período gratuito por el mero hecho de existir reintentos pendientes.
+3. Mantener la cuenta, los recibos y las reservas confirmadas con su precio y acceso acordados. La recuperación de la membresía no revoca por sí misma los permisos válidos de esas estancias.
+4. Si Stripe requiere intervención del cliente, mostrar la acción necesaria. Si informa un próximo intento aplicable, mostrar su fecha; no inventar un calendario ni prometer que todos los rechazos se reintentan.
+5. Al confirmarse el pago, actualizar la vigencia según el período efectivamente abonado, restaurar los beneficios correspondientes y registrar la comisión del referido una sola vez a través de la integración con Connect. Volver del portal de Stripe no basta para marcar el pago como completado.
+6. Si los intentos terminan sin pago, mostrar el estado final y la opción de recuperación o reactivación que corresponda a la suscripción real. Una cancelación y cualquier cambio de plan pendiente deben reconciliarse antes de iniciar nuevas operaciones de cobro.
+
+La propuesta no define todavía cantidades ni plazos de reintento, períodos de gracia, cobros de períodos vencidos ni la política comercial de reactivación. El miembro debe ver qué importe y período va a pagar antes de confirmar una recuperación que requiera su intervención.
+
+### Evidencia para integrar la recuperación
+
+- En la copia de backend `af10a9d9191480d6b5b65f902abeb41859ece21a`, `src/routes/billing.portal.route.ts` exige una sesión de administrador de organización y obtiene el cliente Stripe desde la suscripción de esa organización. Es un patrón de portal existente; Prime necesita su propio vínculo entre miembro, cliente y suscripción.
+- `src/services/stripe-financial-event-ledger.service.ts` ya reconoce familias de eventos de suscripción, facturas y pagos, y distingue eventos nuevos de repetidos. Esto no prueba que el alta, la recuperación o las comisiones de Prime estén implementadas.
+- La integración debe validar los eventos recibidos, su contexto de cuenta y su vínculo con el miembro. Debe conciliar el estado actual cuando lleguen notificaciones repetidas, tardías o fuera de orden. Una factura marcada como pagada fuera de Stripe no acredita por sí sola un cobro procesado ni fondos disponibles para repartir una comisión.
+- Se revisaron las referencias oficiales de [reintentos de cobro](https://docs.stripe.com/billing/revenue-recovery/smart-retries), [eventos de suscripciones](https://docs.stripe.com/billing/subscriptions/webhooks), [portal del cliente](https://docs.stripe.com/customer-management) y [tipos de eventos](https://docs.stripe.com/api/events/types). El portal se utilizará con las funciones compatibles; los cambios programados de suscripción requieren comprobar sus limitaciones antes de habilitar acciones de cambio o cancelación.
+
+La certificación deberá cubrir primer pago fallido, pago pendiente, bienvenida no entregada, enlace vencido, registro interrumpido, renovación fallida, actualización del medio de pago, pago recuperado, cancelación durante la recuperación y eventos duplicados o desordenados. Debe comprobarse que estos casos conservan las reservas y evitan cobros, altas o comisiones duplicadas. Esta revisión solo documenta el recorrido; no envía correos ni cambia la facturación en producción.
 
 ### Cambio entre mensual y anual: propuesta comercial
 
@@ -171,7 +214,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 
 1. **Entrega de la tarjeta:** evaluar los costos de envío antes de decidir los destinos cubiertos y la logística, según indicó el fundador. Obtener origen del despacho, peso y dimensiones del envío y destinos de referencia para cotizar. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
-3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
+3. **Suscripción:** revisar el recorrido propuesto de recuperación de pagos y registro; validar la configuración de reintentos de Stripe Billing, su resultado final y las reglas de reactivación. Cualquier período de gracia adicional requiere definición. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Integrar el reparto recurrente con Stripe Connect, verificar la configuración de pagos de la cuenta conectada y definir recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% y el uso de Stripe Connect están confirmados; los detalles nuevos son propuestas.
 5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
