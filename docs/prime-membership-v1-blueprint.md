@@ -171,7 +171,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 1. **Entrega de la tarjeta:** evaluar los costos de envío antes de decidir los destinos cubiertos y la logística, según indicó el fundador. Obtener origen del despacho, peso y dimensiones del envío y destinos de referencia para cotizar. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
-4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
+4. **Comisiones:** revisar la propuesta de base de cálculo, redondeo por pago y ajustes descrita en «Cálculo y registro de comisiones». Definir calendario de liquidación, recuperación de importes ya pagados y reactivaciones. El porcentaje recurrente de 40% ya está confirmado; los detalles nuevos son propuestas.
 5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
@@ -252,6 +252,47 @@ Propuesta de presentación: una sección «Comisiones Prime» dentro de la propi
 - Ajustes identificados por separado cuando se definan las políticas de reembolso y disputa.
 
 Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada pago de membresía una sola vez, asociado a su propiedad de origen. Las consultas y escrituras deben validar que la propiedad seleccionada pertenece al anfitrión autenticado. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento, las reglas de redondeo y el calendario de liquidación siguen pendientes; el diseño de pantalla no los fija.
+
+### Cálculo y registro de comisiones: propuesta
+
+El 40% recurrente y la atribución por propiedad ya están acordados. Se propone calcularlo sobre el importe de membresía efectivamente pagado, excluyendo impuestos y antes de descontar los costes de procesamiento. En esta propuesta, Pin&Go asume dichos costes con su parte; esa distribución de costes requiere validar la decisión comercial. No se están fijando tasas de impuestos ni tarifas del procesador.
+
+Para pagos en USD, se propone redondear la comisión de cada pago al centavo más cercano, con mitades hacia arriba, usando importes decimales exactos o centavos enteros. Con los precios acordados, los ejemplos serían:
+
+| Plan | Base de membresía del pago | Comisión del 40%, redondeada | Importe restante antes de otros costes |
+| --- | --- | --- | --- |
+| Mensual | USD 9.99 | USD 4.00 | USD 5.99 |
+| Anual | USD 89.99 | USD 36.00 | USD 53.99 |
+
+El importe restante no representa ganancia neta: aún debe cubrir procesamiento, tarjeta, empaque, envío y los demás costes que correspondan. Los ejemplos excluyen impuestos y presuponen el pago completo de la membresía. Cualquier descuento futuro sobre el precio de la propia membresía necesitaría sus reglas; el descuento Prime sobre alojamiento es un concepto separado.
+
+La comisión anual se genera una vez por cada anualidad efectivamente pagada; no genera doce comisiones mensuales. La comisión mensual se genera por cada mensualidad pagada. La fecha de generación y la fecha de liquidación al anfitrión son distintas; este documento todavía no establece el calendario de pago.
+
+### Atribución y movimientos propuestos
+
+La propiedad de origen y su anfitrión se conservan con la membresía. Reservar después otro alojamiento no traslada la atribución. Cambiar entre mensual y anual mantiene ese origen. Una compra directa en pin-ngo.com sin referido verificado no debe atribuirse automáticamente a una propiedad por el hecho de reservarla después. La reactivación después de cancelar la membresía y los cambios de titularidad de la propiedad requieren resolver su política antes de automatizar esos casos.
+
+| Evento | Registro propuesto |
+| --- | --- |
+| Primer pago o renovación confirmado | Registrar una comisión, vinculada al pago, la membresía, el período, la propiedad de origen y el anfitrión beneficiario. |
+| Notificación repetida del mismo pago | Conservar el registro existente; no generar otra comisión ni otro pago al anfitrión. |
+| Cambio de plan programado o renovación fallida | No generar comisión hasta que exista un pago confirmado. |
+| Cancelación de futuras renovaciones | Conservar las comisiones de pagos anteriores válidos; no generar comisiones por períodos sin pagar. |
+| Reembolso confirmado de membresía | Registrar un ajuste sobre la comisión del pago afectado, conservando el historial. |
+| Disputa abierta | Identificar y retener la comisión afectada pendiente de liquidación mientras se conoce el resultado; no clasificar toda disputa como pérdida definitiva. |
+| Disputa resuelta | Reconciliar el resultado con los ajustes y reembolsos existentes, evitando revertir dos veces el mismo importe. |
+
+Propuesta para reembolsos parciales: recalcular la comisión sobre la base de membresía que queda pagada tras los reembolsos confirmados y registrar la diferencia respecto a la comisión vigente. Ejemplo ilustrativo: una anualidad de USD 89.99 genera USD 36.00; si se reembolsan USD 20.00 del importe de membresía, quedan USD 69.99 y una comisión de USD 28.00; el ajuste es de USD 8.00. Un reembolso total deja la comisión en cero. Esto define un cálculo propuesto cuando exista un reembolso autorizado; no establece por sí solo cuándo el miembro tiene derecho a ese reembolso.
+
+Si la comisión ya fue liquidada, mostrar el ajuste pendiente de resolución. La forma de recuperar esos importes o compensarlos con pagos futuros sigue pendiente de acuerdo e implementación; esta propuesta no autoriza débitos automáticos al anfitrión.
+
+### Liquidación y presentación al anfitrión
+
+Por cada propiedad, mostrar comisiones generadas, ajustes, saldo pendiente de liquidación y pagos confirmados, con importe, moneda, período y referencia de origen. Las retenciones y fallos de pago se identifican por separado. La pantalla debe permitir conciliar el saldo: comisiones registradas más ajustes, menos liquidaciones confirmadas, separando cualquier importe retenido.
+
+La atribución se mantiene por propiedad aunque la cuenta de cobro existente sea de la organización. Si una liquidación agrupa varias propiedades, debe conservar su desglose para el anfitrión. Se debe distinguir la transferencia al saldo del anfitrión del abono bancario cuando se registren como etapas distintas; «Pagado al banco» requiere evidencia de esa etapa.
+
+Quedan por definir la periodicidad y fecha de liquidación, los criterios para liberar fondos, cualquier mínimo o retención y la política para ajustes de comisiones ya pagadas. No se realizan transferencias ni se crean compromisos de fechas de pago con esta propuesta. La verificación de la integración deberá cubrir ambos planes, pagos repetidos, pagos fallidos, atribución por propiedad, reembolsos parciales y totales, disputas y liquidaciones fallidas.
 
 ### Base técnica revisada para ubicar estas funciones
 
