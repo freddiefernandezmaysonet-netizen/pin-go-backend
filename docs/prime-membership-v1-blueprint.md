@@ -93,6 +93,33 @@ Cancelar la próxima renovación de Prime conserva las reservaciones confirmadas
 
 Al implementar, las condiciones aceptadas de una reservación deberán conservarse para respetar su precio y acceso aunque la membresía venza antes o durante la estancia. Una comprobación genérica de «membresía vigente ahora» no debe retirar ese derecho ya adquirido. Siguen aplicando los controles propios de la reservación, la identidad, la tarjeta y el horario autorizado. El código local preliminar de condición de pago deberá alinearse con esta regla antes de cualquier integración con accesos.
 
+### Cambio entre mensual y anual: propuesta comercial
+
+Propuesta para revisión del fundador: aplicar los cambios entre planes al terminar el período ya pagado. Ambos planes ofrecen los mismos beneficios, por lo que el miembro puede mantenerlos durante ese período y comenzar la nueva modalidad en la siguiente renovación. Los precios de USD 9.99 al mes y USD 89.99 al año están confirmados; esta regla de cambio todavía es una propuesta.
+
+| Solicitud del miembro | Durante el período pagado | Al llegar la próxima renovación |
+| --- | --- | --- |
+| Mensual a anual | Conserva el mes pagado; se muestra el cambio programado y su fecha. Programar el cambio no genera un cobro. | Con el pago confirmado de USD 89.99, comienza un nuevo período anual. |
+| Anual a mensual | Conserva el año pagado; se muestra el cambio programado y su fecha. Programar el cambio no genera un cobro. | Con el pago confirmado de USD 9.99, comienza un nuevo período mensual. |
+| Deshacer un cambio pendiente | Vuelve a mostrar la renovación del plan actual y su importe, previa confirmación del miembro. | Se conserva la modalidad original, siempre que la renovación siga habilitada. |
+| Cancelar la renovación con un cambio pendiente | Conserva los beneficios hasta la fecha pagada y se elimina el cambio programado. | No se inicia la otra modalidad ni se genera un nuevo cargo de renovación. |
+
+Esta propuesta conserva íntegro el período pagado, por lo que el cambio programado no requiere prorratear ese período. No define una política general de reembolsos. La fecha efectiva debe proceder de la suscripción real y mostrarse de forma explícita; no se calcula suponiendo que todos los meses tienen treinta días.
+
+Ejemplo ilustrativo: un miembro tiene el plan mensual pagado hasta el 10 de diciembre de 2026 y solicita el anual el 27 de noviembre. La pantalla indica «Hoy: USD 0 por este cambio. El 10 de diciembre: USD 89.99 por un año de Prime», con cualquier impuesto aplicable desglosado antes de confirmar. La solicitud no adelanta el cobro ni pierde los días del mes que ya pagó. Las fechas e importes del caso real deben venir del sistema de facturación.
+
+### Presentación y condiciones del cambio propuesto
+
+Desde «Mi cuenta → Membresía», mostrar plan actual, fecha hasta la que está pagado, nueva modalidad, importe de la siguiente renovación y fecha efectiva. El miembro confirma expresamente «Cambiar a anual el [fecha]» o «Cambiar a mensual el [fecha]». El resultado permanece visible como cambio programado hasta que se produzca la renovación correspondiente.
+
+Si la renovación ya está cancelada, elegir otra modalidad debe mostrar que también se está autorizando una futura renovación; esa autorización no se presume por abrir la pantalla. Una membresía ya vencida necesita el recorrido de reactivación y pago, cuya política de atribución sigue pendiente.
+
+La implementación deberá conservar una sola membresía y un solo cobro por período. Cambiar de modalidad no crea otra cuenta, otro envío de primera tarjeta ni otro origen comercial. El anfitrión y la propiedad que originaron la membresía conservan su atribución durante el cambio; la comisión recurrente del 40% se registra sobre cada pago efectivamente confirmado, no al programar el cambio. La base exacta y las liquidaciones siguen pendientes de definición.
+
+Si el pago de la nueva modalidad falla, la pantalla no la presenta como pagada. Se conservan los derechos del período anterior hasta su vencimiento y las reservas ya confirmadas según las reglas acordadas. Los reintentos y cualquier período de gracia siguen pendientes; el cambio de plan no autoriza cobrar la modalidad anterior como alternativa sin consentimiento.
+
+Antes de implementar, deben verificarse los recorridos mensual a anual, anual a mensual, deshacer cambio, cancelar renovación, pago fallido y notificaciones de pago repetidas. Los cambios simultáneos o solicitados cuando un cobro ya está en curso requieren volver a consultar el estado de facturación y mostrar la fecha efectiva válida, sin prometer modificaciones retroactivas.
+
 ## Tarjeta personal y envío: alcance del diseño
 
 La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **la primera tarjeta y su envío están incluidos en la membresía, sin cargo adicional**. Si el miembro extravía la tarjeta, se cobra **USD 5 por el reemplazo**. Quedan por definir los destinos atendidos y la logística de entrega y reposición. El cargo acordado corresponde a extravío; los casos de defecto, daño o pérdida durante el transporte no están definidos por esta decisión.
@@ -142,7 +169,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 ## Decisiones pendientes, en orden de diseño
 
 1. **Entrega de la tarjeta:** evaluar los costos de envío antes de decidir los destinos cubiertos y la logística, según indicó el fundador. Obtener origen del despacho, peso y dimensiones del envío y destinos de referencia para cotizar. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
-2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Queda por definir cómo cambiar entre modalidades, cuándo se hace efectivo el cambio y si se aplica algún prorrateo.
+2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Está documentada para revisión la propuesta de efectuar ambos cambios en la próxima renovación, conservando el período pagado y sin prorratearlo. La regla aún no se considera aprobada ni implementada.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
 5. **Descuento y compra:** definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados el uso del descuento en la misma reserva en la que se compra Prime, la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
