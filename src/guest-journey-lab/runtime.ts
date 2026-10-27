@@ -3,6 +3,7 @@ import { materializeGuestJourneyCoordinationIntents } from "../services/guest-jo
 import { runGuestJourneyCommunicationsOwnerCycle } from "../services/guest-journey-communications-owner-cycle.service";
 import { executeGuestJourneyCommunicationDeliveryAdapter } from "../services/guest-journey-communications-delivery-adapter.service";
 import { recordMessageDeliveryOutcome } from "../services/guest-journey-communications-delivery-outcome.service";
+import { reconcileGuestJourneyCommunicationEvidence } from "../services/guest-journey-communications-recovery.service";
 
 export const prisma = new PrismaClient();
 export const fixtureRevision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12);
@@ -10,8 +11,8 @@ export const fixtureMessageId = (scenario: string) => `gj_lab_${fixtureRevision}
 const fixtureReservationId = (scenario: string) => `gj_lab_${fixtureRevision}_${scenario}`;
 const organizationId = "gj_lab_organization";
 const propertyId = `gj_lab_property_${fixtureRevision}`;
-const scope = { organizationId, propertyId };
-const scenarios = ["accepted", "empty_ack", "timeout", "ota_channel"] as const;
+export const scope = { organizationId, propertyId };
+const scenarios = ["accepted", "empty_ack", "timeout", "ota_channel", "late_ack", "late_failure"] as const;
 
 export async function prepareLabTables(): Promise<void> {
   await prisma.$executeRawUnsafe('CREATE SCHEMA IF NOT EXISTS guest_journey_lab');
@@ -89,12 +90,15 @@ export async function runCommunicationsProbe(): Promise<unknown> {
         throw new Error("GJ_LAB_UNKNOWN_FIXTURE_REJECTED");
       }
       const send = async () => {
-        const providerId = scenario === "accepted" ? `LAB_${messageId}` : null;
+        const providerId = ["accepted", "late_ack", "late_failure"].includes(scenario) ? `LAB_${messageId}` : null;
         await prisma.$executeRaw`INSERT INTO guest_journey_lab.provider_call(message_id, scenario, provider_id)
           VALUES (${messageId}, ${scenario}, ${providerId})`;
         if (scenario === "timeout") return new Promise<never>(() => {});
         if (scenario === "empty_ack") return {};
         if (scenario === "ota_channel") throw new Error("GJ_LAB_OTA_ROUTING_REGRESSION");
+        if (scenario === "late_ack" || scenario === "late_failure") {
+          return new Promise(resolve => setTimeout(() => resolve({ sid: providerId }), 1_500));
+        }
         return { sid: providerId };
       };
       return executeGuestJourneyCommunicationDeliveryAdapter(db, claim, options, {
@@ -114,8 +118,33 @@ export async function runCommunicationsProbe(): Promise<unknown> {
   return metrics;
 }
 
+/** Simulated callbacks are separate from send responses, including failures. */
+export async function emitLabRecoveryReceipts(): Promise<void> {
+  for (const scenario of ["late_ack", "late_failure"]) {
+    const message = await prisma.messageLog.findUnique({ where: { id: fixtureMessageId(scenario) } });
+    const status = scenario === "late_ack" ? "DELIVERED" : "UNDELIVERED";
+    if (!message?.providerMessageId || message.providerDeliveryStatus === status) continue;
+    const eventAt = new Date();
+    await recordMessageDeliveryOutcome(prisma, { provider: "twilio", providerMessageId: message.providerMessageId,
+      status, eventAt, deliveredAt: status === "DELIVERED" ? eventAt : null,
+    });
+  }
+}
+
+export async function runRecoveryProbe() {
+  await emitLabRecoveryReceipts();
+  const intents = await prisma.guestJourneyCoordinationIntent.findMany({ where: {
+    targetEngine: "COMMUNICATIONS", status: "WAITING_FOR_EVIDENCE", reservation: { propertyId },
+  }, orderBy: { id: "asc" }, take: 20, select: { id: true } });
+  const results = [];
+  for (const intent of intents) {
+    results.push(await reconcileGuestJourneyCommunicationEvidence(prisma, { intentId: intent.id, ...scope }));
+  }
+  return { checked: intents.length, recovered: results.filter(result => result.action === "RECOVERED").length, providerCalls: 0 };
+}
+
 export async function readLabEvidence() {
-  const [messages, intents, calls, workers, issues, attempts] = await Promise.all([
+  const [messages, intents, calls, workers, issues, attempts, recoveryAudit] = await Promise.all([
     prisma.messageLog.findMany({ where: { organizationId, propertyId }, orderBy: { id: "asc" }, select: {
       id: true, status: true, providerMessageId: true, providerDeliveryStatus: true,
       deliveredAt: true, retryCount: true, error: true,
@@ -132,13 +161,16 @@ export async function readLabEvidence() {
       GROUP BY scenario ORDER BY scenario`,
     prisma.$queryRaw<Array<{ role: string; commit_sha: string; observed_at: Date; details: unknown }>>`
       SELECT role, commit_sha, observed_at, details FROM guest_journey_lab.heartbeat ORDER BY role`,
-    prisma.operationalIssue.count({ where: { organizationId, propertyId } }),
+    prisma.operationalIssue.findMany({ where: { organizationId, propertyId }, orderBy: { operationalKey: "asc" },
+      select: { id: true, issueCode: true, workflowState: true, visibility: true, title: true, resolvedAt: true } }),
     prisma.guestJourneyCoordinationIntentAttempt.count({ where: { intent: { reservation: { propertyId } } } }),
+    prisma.apmsAuditEntry.findMany({ where: { organizationId, propertyId, reason: "COMMUNICATION_DELIVERY_RECEIPT_CONFIRMED" },
+      select: { decisionId: true, entityId: true, status: true, completedAt: true, metadata: true } }),
   ]);
   return {
     mode: "SIMULATION_ONLY", fixtureRevision, productionReady: false, externalProviderCallsAllowed: false,
     coverage: "E4/E7 outbox, claims, simulated send, callback persistence and replay; not full reservation certification",
-    knownGaps: ["timeout recovery", "all-event first-send parity", "delivery-gated completion", "host Mission Control parity"],
-    messages, intents, calls, workers, operationalIssues: issues, durableAttempts: attempts,
+    knownGaps: ["unknown results without provider correlation", "callbacks arriving before provider ID persistence", "all-event first-send parity", "delivery-gated completion for initial sends", "full host Mission Control UI certification"],
+    messages, intents, calls, workers, operationalIssues: issues.length, issues, recoveryAudit, durableAttempts: attempts,
   };
 }

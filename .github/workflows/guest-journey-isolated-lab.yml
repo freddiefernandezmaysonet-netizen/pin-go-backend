@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "src/guest-journey-lab/**"
-      - "src/services/guest-journey-communications-delivery-adapter.service*"
+      - "src/services/guest-journey-communications-*.ts"
       - ".github/workflows/guest-journey-isolated-lab.yml"
   workflow_dispatch:
 
@@ -52,9 +52,11 @@ jobs:
           --moduleResolution bundler --target esnext --types node
           src/guest-journey-lab/main.ts src/guest-journey-lab/isolation.test.ts
           src/guest-journey-lab/runtime.db.test.ts
+          src/services/guest-journey-communications-recovery.service.test.ts
       - name: Verify isolation and E7 regressions
         run: |
           node --import tsx --test src/guest-journey-lab/isolation.test.ts
+          node --import tsx --test src/services/guest-journey-communications-recovery.service.test.ts
           npm run test:guest-journey-enterprise-e7-communications
       - name: Apply migrations only to disposable PostgreSQL
         run: node --import tsx src/guest-journey-lab/main.ts --prepare

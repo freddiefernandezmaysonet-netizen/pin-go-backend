@@ -1,6 +1,7 @@
 import {
   GuestJourneyCoordinationIntentStatus,
   PrismaClient,
+  Prisma,
 } from "@prisma/client";
 
 import { upsertOperationalIssue } from "../apms/operational-intelligence.service";
@@ -14,7 +15,7 @@ export type CommunicationsMissionControlResult = {
 };
 
 export async function syncGuestJourneyCommunicationMissionControl(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   intentId: string,
   expectedScope: {
     organizationId: string;
@@ -66,17 +67,23 @@ export async function syncGuestJourneyCommunicationMissionControl(
       workflowState: true,
       lastSignalAt: true,
       firstDetectedAt: true,
+      visibility: true,
+      issueCode: true,
     },
   });
 
-  if (intent.status !== GuestJourneyCoordinationIntentStatus.EXHAUSTED) {
+  const waiting = intent.status === GuestJourneyCoordinationIntentStatus.WAITING_FOR_EVIDENCE;
+  if (!waiting && intent.status !== GuestJourneyCoordinationIntentStatus.EXHAUSTED) {
+    if (![GuestJourneyCoordinationIntentStatus.SUCCEEDED, GuestJourneyCoordinationIntentStatus.SUPERSEDED].includes(intent.status as never)) {
+      return { action: "NOT_REQUIRED", operationalIssueWrites: 0, externalSideEffects: 0 };
+    }
     if (!existing || existing.workflowState === "RESOLVED") {
       return { action: "NOT_REQUIRED", operationalIssueWrites: 0, externalSideEffects: 0 };
     }
     const occurredAt = intent.succeededAt ?? intent.supersededAt ?? intent.updatedAt;
     await dependencies.upsert(prisma, {
       operationalKey,
-      issueCode: ISSUE_CODE,
+      issueCode: existing.issueCode ?? ISSUE_CODE,
       title: "Communication delivery escalation resolved",
       issue: "The durable communication intent no longer requires developer intervention.",
       operationalImpact: "The communication owner reached a terminal non-exhausted state.",
@@ -85,7 +92,7 @@ export async function syncGuestJourneyCommunicationMissionControl(
       engine: "GUEST_JOURNEY",
       severity: "INFO",
       workflowState: "RESOLVED",
-      visibility: "DEVELOPER",
+      visibility: existing.visibility ?? "DEVELOPER",
       responsibleActor: "PIN_GO",
       actionRequired: false,
       canAutoResolve: true,
@@ -129,16 +136,16 @@ export async function syncGuestJourneyCommunicationMissionControl(
   const occurredAt = intent.exhaustedAt ?? intent.updatedAt;
   await dependencies.upsert(prisma, {
     operationalKey,
-    issueCode: ISSUE_CODE,
-    title: "Communication delivery exhausted its retry budget",
-    issue: "The fenced COMMUNICATIONS owner exhausted automatic recovery.",
+    issueCode: waiting ? "GUEST_JOURNEY_COMMUNICATIONS_OUTCOME_UNKNOWN" : ISSUE_CODE,
+    title: waiting ? "Entrega de mensaje sin confirmar" : "Communication delivery exhausted its retry budget",
+    issue: waiting ? "El proveedor no ha aportado evidencia suficiente de entrega." : "The fenced COMMUNICATIONS owner exhausted automatic recovery.",
     operationalImpact: "Delivery is not confirmed; automatic replay stopped to prevent duplicates or contacting the wrong recipient.",
-    recommendedAction: "Review the correlated message and provider evidence before rearming this intent.",
-    nextAutomaticStep: null,
+    recommendedAction: waiting ? "Revisar la evidencia del proveedor. No reenviar mientras el resultado sea incierto." : "Review the correlated message and provider evidence before rearming this intent.",
+    nextAutomaticStep: waiting ? "Reconciliar el receipt cuando esté disponible, sin repetir el envío." : null,
     engine: "GUEST_JOURNEY",
     severity: "CRITICAL",
     workflowState: "ACTION_REQUIRED",
-    visibility: "DEVELOPER",
+    visibility: waiting ? "HOST" : "DEVELOPER",
     responsibleActor: "SYSTEM",
     actionRequired: true,
     canAutoResolve: false,
@@ -165,8 +172,8 @@ export async function syncGuestJourneyCommunicationMissionControl(
       claimCount: intent.claimCount,
       errorCode: intent.lastError,
     },
-    transitionCode: "GUEST_JOURNEY_COMMUNICATIONS_RETRY_BUDGET_EXHAUSTED",
-    transitionSummary: "The COMMUNICATIONS owner exhausted its fenced retry budget.",
+    transitionCode: waiting ? "GUEST_JOURNEY_COMMUNICATIONS_OUTCOME_UNKNOWN" : "GUEST_JOURNEY_COMMUNICATIONS_RETRY_BUDGET_EXHAUSTED",
+    transitionSummary: waiting ? "La entrega sigue sin confirmar; el reenvío está bloqueado." : "The COMMUNICATIONS owner exhausted its fenced retry budget.",
     transitionedBy: "PIN_GO",
     occurredAt,
   });

@@ -2,7 +2,7 @@
 
 The laboratory is separate from Pin&Go production and the Channex certification environments.
 It runs real E4/E7 code against synthetic records and simulated providers. It does not certify
-complete reservation-event coverage, physical delivery, unknown-outcome recovery or host Mission Control.
+complete reservation-event coverage, physical delivery, uncorrelated-outcome recovery or the host Mission Control UI.
 
 ## Infrastructure boundary
 
@@ -63,6 +63,8 @@ Deploy the API successfully before the two workers. The API healthcheck is `/rea
 | Accepted simulated SMS | One simulator call, a durable attempt, provider ID prefixed LAB_, simulated DELIVERED receipt |
 | Empty provider acknowledgement | E7_SENDING and WAITING_FOR_EVIDENCE, no provider ID, no blind replay |
 | Provider timeout | E7_SENDING and WAITING_FOR_EVIDENCE, no blind replay; recovery remains an open product gap |
+| Late acknowledgement + delivered receipt | Provider ID retained after timeout; only the correlated receipt closes the intent; one immutable recovery audit |
+| Late acknowledgement + failed delivery receipt | UNDELIVERED remains pending with host-visible attention, without automatic resend |
 | Airbnb operational SMS | OBSOLETE under the existing channel policy, zero SMS calls; Channex delivery is not certified by this result |
 | Repeat / reconnect / worker restart | Same call counts and attempt count; fixtures are never reset on startup |
 
@@ -72,6 +74,33 @@ Fixture identifiers include the deployed commit prefix, exposed as `fixtureRevis
 A new commit gets independent synthetic fixtures; older attempts remain in the database.
 Restarts of the same pinned commit reuse the same records and must not increase provider calls.
 The read-only page is an evidence monitor, not a replacement for the product's Mission Control.
+
+## Receipt recovery boundary
+
+The lab Communications worker invokes receipt reconciliation after its normal cycle. Production
+workers do not invoke this new service. A late acknowledgement preserves only the provider ID;
+it leaves the `E7_SENDING` fence intact. A confirmed DELIVERED/READ receipt must match the exact
+message, reservation, organization, property, channel and existing durable attempt. Its timestamps
+must belong to that attempt and its provider ID must identify exactly one message.
+
+Reconciliation performs no provider calls. One serializable transaction compares the pending
+intent, records the receipt fingerprint, marks it successful, appends immutable audit evidence and
+resolves its operational alert. A failed audit write rolls back the transition. Historical send
+attempts, claim counts and retry budgets are preserved. Concurrent reconciliation cannot close it twice.
+
+Without sufficient evidence, the send fence stays in place and a HOST-visible ACTION_REQUIRED item
+is persisted. PENDING, RETRYABLE and CLAIMED states cannot clear that alert. The lab API displays these
+canonical issue records; this does not certify the frontend Mission Control experience.
+
+After the six fixture scenarios finish: six durable attempts, five simulator calls, one receipt
+recovery audit, one resolved alert and three open alerts are expected. Repeating cycles and restarting
+the worker must preserve those counts. The PostgreSQL test also injects audit failure, wrong-tenant
+access and two concurrent reconcilers. No migration or dependency change is needed for this step.
+
+Remaining limits: a provider response lost with the process, an acknowledgement with no identifier,
+or a callback arriving before provider-ID persistence cannot yet be recovered automatically. A durable
+correlation/inbox contract is still required. Initial accepted sends still use the existing completion
+rule; full delivery-gated completion and safe retries after provider-reported failure remain pending.
 
 ## Controlled operation
 

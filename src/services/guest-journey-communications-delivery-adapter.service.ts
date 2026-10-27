@@ -58,6 +58,11 @@ function clean(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function providerIdentifier(result: any): string | null {
+  return [result?.sid, result?.data?.id, result?.providerMessageId, result?.id]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? null;
+}
+
 function parseEmailEnvelope(body: string): {
   type: string;
   retryPayload: Record<string, unknown>;
@@ -619,6 +624,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   }
 
   let providerResult: any;
+  const dispatchRetryCount = message.retryCount;
+  let timedOut = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const providerPromise = requestedChannel === "sms"
       ? dependencies.sendSms(message.to, smsBody)
@@ -631,12 +639,34 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
           organizationId: claim.organizationId,
           propertyId: claim.propertyId,
         });
+    // A late acknowledgement is acceptance evidence, never proof of delivery.
+    // Keep the send fence until receipt reconciliation can establish the result.
+    void providerPromise.then(async result => {
+      if (!timedOut) return;
+      const id = providerIdentifier(result);
+      if (!id) return;
+      const persisted = await prisma.messageLog.updateMany({
+        where: {
+          id: message.id, organizationId: claim.organizationId, propertyId: claim.propertyId,
+          reservationId: claim.reservationId, status: "E7_SENDING", providerMessageId: null,
+          retryCount: { in: [dispatchRetryCount, dispatchRetryCount + 1] },
+        },
+        data: { providerMessageId: id },
+      });
+      if (persisted.count !== 1) {
+        console.warn("COMMUNICATION_LATE_ACK_FENCE_LOST", { messageLogId, intentId: claim.intentId });
+      }
+    }, () => {}).catch(() => {
+      console.error("COMMUNICATION_LATE_ACK_PERSISTENCE_FAILED", { messageLogId, intentId: claim.intentId });
+    });
     providerResult = await Promise.race([
       providerPromise,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error("COMMUNICATION_PROVIDER_TIMEOUT")),
-        providerTimeoutMs
-      )),
+      new Promise((_, reject) => {
+        deadline = setTimeout(() => {
+          timedOut = true;
+          reject(new Error("COMMUNICATION_PROVIDER_TIMEOUT"));
+        }, providerTimeoutMs);
+      }),
     ]);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -663,11 +693,11 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       };
     }
     throw error;
+  } finally {
+    clearTimeout(deadline);
   }
 
-  const providerMessageId = [providerResult?.sid, providerResult?.data?.id,
-    providerResult?.providerMessageId, providerResult?.id]
-    .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? null;
+  const providerMessageId = providerIdentifier(providerResult);
   if (!providerMessageId) {
     const uncertain = await prisma.messageLog.updateMany({
       where: { id: message.id, status: "E7_SENDING" },

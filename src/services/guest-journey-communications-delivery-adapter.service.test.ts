@@ -46,7 +46,8 @@ function fakePrisma(input: {
     retryCount: 0,
     to: "+17875550101",
     body: "Existing canonical body",
-    providerMessageId: null,
+    providerMessageId: null as string | null,
+    deliveredAt: null as Date | null,
     error: "provider failed",
     ...input.message,
   };
@@ -79,6 +80,9 @@ function fakePrisma(input: {
         if (args.where.status !== undefined && args.where.status !== message.status) {
           return { count: 0 };
         }
+        if (args.where.providerMessageId !== undefined && args.where.providerMessageId !== message.providerMessageId) {
+          return { count: 0 };
+        }
         if (args.data.status) message.status = args.data.status;
         if (args.data.providerMessageId !== undefined) {
           message.providerMessageId = args.data.providerMessageId;
@@ -95,6 +99,42 @@ function fakePrisma(input: {
 const noEmail = async () => {
   throw new Error("email must not execute");
 };
+
+test("late provider acknowledgement is retained without delivery success or another send", async () => {
+  const f = fakePrisma({});
+  let resolve!: (value: any) => void;
+  let calls = 0;
+  const delivery = new Promise<any>(done => { resolve = done; });
+  const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" });
+  const deps = { sendSms: async () => { calls++; return delivery; }, sendEmail: noEmail };
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent,
+    { now, providerTimeoutMs: 5 }, deps);
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  resolve({ sid: " SM-late " });
+  await new Promise(done => setImmediate(done));
+  assert.equal(f.message.providerMessageId, "SM-late");
+  assert.equal(f.message.status, "E7_SENDING");
+  assert.equal(f.message.retryCount, 1);
+  assert.equal(f.message.deliveredAt, null);
+  await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, { now }, deps);
+  assert.equal(calls, 1);
+  assert.deepEqual(f.updates.at(-1).where.retryCount, { in: [0, 1] });
+});
+
+test("late response never overwrites an existing provider correlation", async () => {
+  const f = fakePrisma({});
+  let resolve!: (value: any) => void;
+  await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+    claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+    { now, providerTimeoutMs: 5 }, {
+      sendSms: () => new Promise<any>(done => { resolve = done; }), sendEmail: noEmail,
+    });
+  f.message.providerMessageId = "SM-canonical";
+  resolve({ sid: "SM-conflicting" });
+  await new Promise(done => setImmediate(done));
+  assert.equal(f.message.providerMessageId, "SM-canonical");
+  assert.equal(f.message.status, "E7_SENDING");
+});
 
 test("blocked Booking.com and Airbnb operational E7 retries never call SMS or email providers", async () => {
   const oldValue = process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS;

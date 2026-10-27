@@ -82,12 +82,14 @@ if (role === "api") {
     try {
       if (role === "communications") {
         console.log("GJ_LAB_COMMUNICATIONS_CYCLE", JSON.stringify(await runtime.runCommunicationsProbe()));
+        console.log("GJ_LAB_COMMUNICATIONS_RECOVERY", JSON.stringify(await runtime.runRecoveryProbe()));
       } else {
         const evidence = await runtime.readLabEvidence();
         await runtime.heartbeat("monitor", {
           mode: "OBSERVE_ONLY", messages: evidence.messages.length,
           waiting: evidence.intents.filter(intent => intent.status === "WAITING_FOR_EVIDENCE").length,
-          automaticUnknownRecoveryImplemented: false,
+          receiptRecoveryEnabled: true,
+          uncorrelatedOutcomeRecoveryImplemented: false,
         });
       }
     } catch (error) {
