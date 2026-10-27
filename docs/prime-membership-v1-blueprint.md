@@ -21,6 +21,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Comisión por captación | El anfitrión desde cuya página se originó la membresía recibe el 40% de cada mensualidad pagada mientras la membresía siga activa. Es una comisión recurrente, no limitada al primer pago. |
 | Descuento obligatorio | Para participar en Prime, el anfitrión debe ofrecer un descuento elegido entre 5% y 20%. |
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
+| Envío de la primera tarjeta | Sin cargo para el miembro, confirmado por el fundador. El coste de la tarjeta en sí sigue pendiente de definición. |
 
 La venta de la membresía debe conservar el origen de adquisición y el anfitrión correspondiente para atribuir las mensualidades. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones.
 
@@ -52,13 +53,13 @@ La dirección se solicita **durante el registro inicial**, según la aclaración
 
 ## Tarjeta personal y envío: alcance del diseño
 
-La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. Quedan por definir el coste de la primera tarjeta, el coste de envío, destinos atendidos, entrega y reposición; no se ha prometido envío gratuito ni mundial.
+La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **el envío de la primera tarjeta no tiene cargo para el miembro**. Quedan por definir el coste de la tarjeta en sí, destinos atendidos, entrega y reposición; los destinos cubiertos todavía no están establecidos.
 
 El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de definición. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
 
 ## Decisiones pendientes, en orden de diseño
 
-1. **Primera tarjeta y envío:** incluidos en la membresía o con cargo adicional; importes y destinos cubiertos.
+1. **Primera tarjeta:** confirmar si la tarjeta en sí está incluida en la membresía o tiene un cargo único. El envío ya está confirmado sin cargo; faltan los destinos cubiertos y la logística de entrega.
 2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
 3. **Suscripción:** cancelación, renovación fallida, recuperación y tratamiento de viajes ya reservados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
@@ -127,7 +128,7 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 
 Primera entrega propuesta: una búsqueda completa en un entorno de prueba con un miembro y propiedades explícitamente habilitadas. El mecanismo NFC se conecta después de validar el vínculo miembro–reserva; no se activa por una búsqueda ni por una cotización.
 
-Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. El precio definitivo, las reglas de liquidación, tarjeta/envío y los beneficios adicionales siguen pendientes. El descuento obligatorio y la comisión recurrente ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
+Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. El precio definitivo, las reglas de liquidación, el coste de la tarjeta, los destinos y la logística de entrega, y los beneficios adicionales siguen pendientes. El descuento obligatorio, la comisión recurrente y el envío inicial sin cargo ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
 
 ## Contrato técnico propuesto
 
