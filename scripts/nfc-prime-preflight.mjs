@@ -46,12 +46,22 @@ export function publicCard(card) {
     startDate: card.startDate ?? null, endDate: card.endDate ?? null };
 }
 
+export function referenceMatches(card, reference) {
+  // Compare decimal representations only; never infer hex or reverse UID bytes.
+  const decimal = value => /^\d{1,20}$/.test(String(value ?? "")) ? BigInt(value).toString() : null;
+  const target = decimal(reference);
+  if (target === null) throw new Error("INVALID_CARD_REFERENCE");
+  return ["cardId", "cardNumber"].filter(field => decimal(card[field]) === target);
+}
+
 export async function main(env = process.env) {
   if (env.NFC_PRIME_PREFLIGHT !== "1" || !env.DATABASE_URL || !env.TTLOCK_CLIENT_ID) {
     console.log(JSON.stringify({ kind: "NFC_PRIME_PREFLIGHT", status: "NOT_CONFIGURED", writes: 0 }));
     return;
   }
   const base = checkedBase(env.TTLOCK_API_BASE);
+  const reference = env.NFC_PRIME_CARD_REFERENCE;
+  if (reference !== undefined) referenceMatches({}, reference);
   phase = "database_connection";
   const { SQL } = await import("bun");
   const databaseUrl = new URL(env.DATABASE_URL);
@@ -86,10 +96,15 @@ export async function main(env = process.env) {
         SELECT count(*)::int AS "activeReservationsNext24h" FROM "Reservation"
         WHERE "propertyId" = ${DEMO_PROPERTY_ID} AND status = 'ACTIVE'
           AND "checkOut" > CURRENT_TIMESTAMP AND "checkIn" < CURRENT_TIMESTAMP + INTERVAL '24 hours'`;
-      return { property, locks, auth, reservations };
+      const lookupLocks = reference === undefined ? [] : await tx`
+        SELECT l."ttlockLockId", l."ttlockLockName", p.name AS "propertyName", p.id AS "propertyId"
+        FROM "Lock" l JOIN "Property" p ON p.id = l."propertyId"
+        WHERE p."organizationId" = ${property.organizationId} AND l."isActive" = true
+        ORDER BY l."ttlockLockId" LIMIT 51`;
+      return { property, locks, auth, reservations, lookupLocks };
     });
   } finally { await sql.close(); }
-  const { property, locks, auth, reservations } = snapshot;
+  const { property, locks, auth, reservations, lookupLocks } = snapshot;
   console.log(JSON.stringify({ kind: "NFC_PRIME_SCOPE", writes: 0,
     property: { id: property.id, name: property.name, isTestProperty: property.isTestProperty,
       timezone: property.timezone }, ...reservations, locks }));
@@ -99,6 +114,30 @@ export async function main(env = process.env) {
   }
   const config = { base, clientId: env.TTLOCK_CLIENT_ID, accessToken: auth.accessToken };
   phase = "ttlock_reads";
+  if (reference !== undefined) {
+    if (lookupLocks.length > 50) throw new Error("CARD_LOOKUP_SCOPE_TOO_LARGE");
+    const matches = [];
+    let complete = true;
+    for (const lock of lookupLocks) {
+      let lockComplete = false;
+      for (let pageNo = 1; pageNo <= 10; pageNo++) {
+        const page = await providerRead(config, "/v3/identityCard/list", {
+          lockId: String(lock.ttlockLockId), pageNo: String(pageNo), pageSize: "100",
+        });
+        if (!Array.isArray(page.list)) throw new Error("INVALID_CARD_LIST");
+        for (const card of page.list) {
+          const matchedFields = referenceMatches(card, reference);
+          if (matchedFields.length) matches.push({ ...lock, ...publicCard(card), matchedFields });
+        }
+        if (page.list.length < 100) { lockComplete = true; break; }
+      }
+      complete = complete && lockComplete;
+    }
+    console.log(JSON.stringify({ kind: "NFC_PRIME_CARD_LOOKUP", writes: 0,
+      status: complete ? "READ_COMPLETE" : "PARTIAL_READ", scope: "DEMO_ORGANIZATION_ACTIVE_LOCKS",
+      locksChecked: lookupLocks.length, matches, physicalCompatibility: "NOT_TESTED" }));
+    return;
+  }
   const gatewayStates = new Map();
   for (let pageNo = 1; pageNo <= 10; pageNo++) {
     const page = await providerRead(config, "/v3/gateway/list", {
@@ -139,7 +178,7 @@ if (import.meta.main) {
   try { await main(); }
   catch (error) {
     const message = String(error?.message ?? "");
-    const safe = /^(UNSUPPORTED_DATABASE_SCHEMA|UNSUPPORTED_TTLOCK_ORIGIN|READ_ONLY_ENDPOINT_REQUIRED|TTLOCK_AUTH_MISSING|TTLOCK_HTTP_\d+|TTLOCK_INVALID_JSON|TTLOCK_CODE_-?\d+|INVALID_CARD_LIST|INVALID_GATEWAY_LIST|DEMO_NOT_ACTIVE)$/.test(message)
+    const safe = /^(INVALID_CARD_REFERENCE|CARD_LOOKUP_SCOPE_TOO_LARGE|UNSUPPORTED_DATABASE_SCHEMA|UNSUPPORTED_TTLOCK_ORIGIN|READ_ONLY_ENDPOINT_REQUIRED|TTLOCK_AUTH_MISSING|TTLOCK_HTTP_\d+|TTLOCK_INVALID_JSON|TTLOCK_CODE_-?\d+|INVALID_CARD_LIST|INVALID_GATEWAY_LIST|DEMO_NOT_ACTIVE)$/.test(message)
       ? message : "PREFLIGHT_FAILED";
     const sqlState = /^[A-Z0-9_]{2,60}$/.test(String(error?.code ?? "")) ? error.code : null;
     const missingColumn = message.match(/^column "([A-Za-z0-9_.]+)" does not exist$/)?.[1] ?? null;
