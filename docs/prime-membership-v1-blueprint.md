@@ -21,7 +21,8 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Comisión por captación | El anfitrión desde cuya página se originó la membresía recibe el 40% de cada mensualidad pagada mientras la membresía siga activa. Es una comisión recurrente, no limitada al primer pago. |
 | Descuento obligatorio | Para participar en Prime, el anfitrión debe ofrecer un descuento elegido entre 5% y 20%. |
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
-| Envío de la primera tarjeta | Sin cargo para el miembro, confirmado por el fundador. El coste de la tarjeta en sí sigue pendiente de definición. |
+| Primera tarjeta y envío | Incluidos en la membresía, sin cargo adicional para el miembro. |
+| Reemplazo por extravío | USD 5 por reemplazar una tarjeta extraviada. |
 
 La venta de la membresía debe conservar el origen de adquisición y el anfitrión correspondiente para atribuir las mensualidades. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones.
 
@@ -53,18 +54,18 @@ La dirección se solicita **durante el registro inicial**, según la aclaración
 
 ## Tarjeta personal y envío: alcance del diseño
 
-La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **el envío de la primera tarjeta no tiene cargo para el miembro**. Quedan por definir el coste de la tarjeta en sí, destinos atendidos, entrega y reposición; los destinos cubiertos todavía no están establecidos.
+La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **la primera tarjeta y su envío están incluidos en la membresía, sin cargo adicional**. Si el miembro extravía la tarjeta, se cobra **USD 5 por el reemplazo**. Quedan por definir los destinos atendidos y la logística de entrega y reposición. El cargo acordado corresponde a extravío; los casos de defecto, daño o pérdida durante el transporte no están definidos por esta decisión.
 
 El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de definición. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
 
 ## Decisiones pendientes, en orden de diseño
 
-1. **Primera tarjeta:** confirmar si la tarjeta en sí está incluida en la membresía o tiene un cargo único. El envío ya está confirmado sin cargo; faltan los destinos cubiertos y la logística de entrega.
+1. **Entrega de la tarjeta:** definir destinos cubiertos y logística de entrega. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
 3. **Suscripción:** cancelación, renovación fallida, recuperación y tratamiento de viajes ya reservados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
 5. **Descuento:** configuración por propiedad o común al anfitrión; combinación con otras promociones y cambios aplicables a reservas existentes. La obligatoriedad, rango 5–20% y base de alojamiento por noche ya están confirmados.
-6. **Tarjeta:** vinculación, recepción, pérdida, reposición y tratamiento de permisos pendientes o activos.
+6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
 
@@ -128,7 +129,7 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 
 Primera entrega propuesta: una búsqueda completa en un entorno de prueba con un miembro y propiedades explícitamente habilitadas. El mecanismo NFC se conecta después de validar el vínculo miembro–reserva; no se activa por una búsqueda ni por una cotización.
 
-Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. El precio definitivo, las reglas de liquidación, el coste de la tarjeta, los destinos y la logística de entrega, y los beneficios adicionales siguen pendientes. El descuento obligatorio, la comisión recurrente y el envío inicial sin cargo ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
+Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. El precio definitivo de la membresía, las reglas de liquidación, los destinos y la logística de entrega, y los beneficios adicionales siguen pendientes. El descuento obligatorio, la comisión recurrente, la primera tarjeta y su envío incluidos, y el reemplazo por extravío de USD 5 ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
 
 ## Contrato técnico propuesto
 
