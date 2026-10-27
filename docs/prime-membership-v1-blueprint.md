@@ -1,7 +1,7 @@
 # Pin&Go Prime — dashboard de miembros y búsqueda con Pin AI
 
 Fecha: 27 de octubre de 2026, America/Puerto_Rico.
-Estado: piloto privado de búsqueda conversacional implementado y desplegado para Demo; membresía comercial, cuentas permanentes y afiliación de anfitriones pendientes.
+Estado: diseño comercial en definición con el fundador. Piloto privado de búsqueda conversacional desplegado para Demo. Las reglas comerciales y el registro descritos a continuación están acordados para su implementación futura; todavía no están activos.
 
 ## Decisiones del fundador
 
@@ -10,6 +10,62 @@ Estado: piloto privado de búsqueda conversacional implementado y desplegado par
 - Pin AI será la interfaz principal de búsqueda: conversación, resultados visuales y refinamiento.
 - Una tarjeta física personal reutilizable es uno de los beneficios previstos.
 - Los proveedores y el personal de limpieza son otra línea de desarrollo; no condicionan esta primera versión.
+
+## Reglas comerciales confirmadas el 27 de octubre de 2026
+
+| Concepto | Decisión del fundador |
+| --- | --- |
+| Periodicidad | Membresía mensual. |
+| Precio | USD 9.99 al mes es el precio probable, pendiente de decisión definitiva. No crear todavía un precio comercial como si estuviera aprobado. |
+| Canales de compra | Página de reservas de cualquier anfitrión o directamente en pin-ngo.com. |
+| Comisión por captación | El anfitrión desde cuya página se originó la membresía recibe el 40% de cada mensualidad pagada mientras la membresía siga activa. Es una comisión recurrente, no limitada al primer pago. |
+| Descuento obligatorio | Para participar en Prime, el anfitrión debe ofrecer un descuento elegido entre 5% y 20%. |
+| Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
+
+La venta de la membresía debe conservar el origen de adquisición y el anfitrión correspondiente para atribuir las mensualidades. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones.
+
+Ejemplo ilustrativo del descuento: tres noches de USD 150 producen un subtotal de alojamiento de USD 450. Con 10% Prime, el descuento es USD 45 y el alojamiento queda en USD 405. Limpieza y otros conceptos se incorporan por separado. Este ejemplo no constituye una tarifa real ni fija un tratamiento fiscal.
+
+## Alta del miembro: flujo confirmado
+
+La referencia al flujo del cleaner significa específicamente **recibir el email de bienvenida y crear la contraseña desde ese correo**. Este es el recorrido comercial acordado:
+
+1. El cliente compra la membresía desde uno de los canales establecidos.
+2. Se confirma el pago de la membresía.
+3. Recibe un email de bienvenida a Pin&Go Prime con el enlace personal para crear su contraseña.
+4. Crea su contraseña y completa los datos requeridos, incluida su dirección de envío.
+5. Entra a su dashboard Prime y utiliza sus credenciales para los siguientes accesos.
+
+El flujo exacto del cleaner deberá auditarse antes de reutilizarlo. Prime tendrá su identidad de miembro y sus permisos propios. Las invitaciones del piloto son una herramienta de prueba; el alta comercial acordada se inicia con la compra y el email de bienvenida.
+
+El registro inicial incluye:
+
+| Dato | Requisito acordado |
+| --- | --- |
+| Nombre y apellidos | Identificación del miembro y destinatario de su tarjeta. |
+| Correo electrónico | El utilizado en la compra, ya cargado en el registro. |
+| Contraseña | Creada por el cliente desde el enlace de bienvenida. |
+| Teléfono | Con código de país. |
+| Dirección de envío | Calle y número; apartamento/unidad si aplica; ciudad; estado, provincia o región; código postal cuando corresponda; país. |
+
+La dirección se solicita **durante el registro inicial**, según la aclaración expresa del fundador, para poder enviar la tarjeta física de acceso. Idioma y preferencias de viaje pueden completarse después desde el dashboard.
+
+## Tarjeta personal y envío: alcance del diseño
+
+La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. Quedan por definir el coste de la primera tarjeta, el coste de envío, destinos atendidos, entrega y reposición; no se ha prometido envío gratuito ni mundial.
+
+El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de definición. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
+
+## Decisiones pendientes, en orden de diseño
+
+1. **Primera tarjeta y envío:** incluidos en la membresía o con cargo adicional; importes y destinos cubiertos.
+2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
+3. **Suscripción:** cancelación, renovación fallida, recuperación y tratamiento de viajes ya reservados.
+4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
+5. **Descuento:** configuración por propiedad o común al anfitrión; combinación con otras promociones y cambios aplicables a reservas existentes. La obligatoriedad, rango 5–20% y base de alojamiento por noche ya están confirmados.
+6. **Tarjeta:** vinculación, recepción, pérdida, reposición y tratamiento de permisos pendientes o activos.
+
+Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
 
 ## Evidencia y punto de partida
 
@@ -62,8 +118,8 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 
 | Área | Entrega propuesta |
 | --- | --- |
-| Miembro | Cuenta persistente, estado de membresía y vínculo verificado con sus reservas. Reutilización de cuenta en Guest como objetivo, previa revisión de su identidad actual. |
-| Host | Afiliación por propiedad y configuración explícita de beneficios. |
+| Miembro | Compra, pago confirmado, email de bienvenida, creación de contraseña y registro con dirección de envío. Cuenta persistente, membresía y vínculo verificado con sus reservas. Reutilización de cuenta en Guest como objetivo, previa revisión de su identidad actual. |
+| Host | Afiliación y descuento obligatorio de 5–20% sobre alojamiento por noche; comisión recurrente de 40% por membresías originadas en su página. Liquidación pendiente de diseño. |
 | Buscar con Pin AI | Conversación en español/inglés, criterios editables, resultados, comparación y selección. |
 | Reservar | Reutilizar cotización y checkout de Direct Booking, conservando validaciones. |
 | Mis viajes | Próximas estancias, historial y acceso verificado al portal de cada reserva. |
@@ -71,7 +127,7 @@ Al seleccionar Reservar se vuelven a validar membresía, afiliación, precio, di
 
 Primera entrega propuesta: una búsqueda completa en un entorno de prueba con un miembro y propiedades explícitamente habilitadas. El mecanismo NFC se conecta después de validar el vínculo miembro–reserva; no se activa por una búsqueda ni por una cotización.
 
-Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. Precios de membresía, niveles, financiación de descuentos, cobro y catálogo definitivo de beneficios están pendientes de definición comercial; este documento no los activa ni los promete.
+Voz queda como ampliación posterior de la misma búsqueda. La primera versión usa conversación escrita. El precio definitivo, las reglas de liquidación, tarjeta/envío y los beneficios adicionales siguen pendientes. El descuento obligatorio y la comisión recurrente ya están definidos en este documento; su integración con cobros y reservas todavía no está implementada.
 
 ## Contrato técnico propuesto
 
@@ -95,3 +151,5 @@ Pin AI interpreta y explica. Las funciones del servidor deciden elegibilidad, di
 - Modificaciones, cancelación y pérdida de tarjeta se reflejan en el permiso con estado real del proveedor; una revocación pendiente no se muestra como completada.
 
 Este documento registra el diseño acordado. El piloto aislado usa conversación contextual, planes de viaje guardados por elección del miembro, disponibilidad y cotización de Demo con la base de datos en modo de solo lectura; su evidencia de verificación está en `prime-pilot/VERIFICATION.md`. El fundador dispone además de una configuración de participación ACTIVE/PAUSED para Demo y beneficios propuestos en borrador. Esto no constituye afiliación comercial de anfitriones ni activa descuentos. El resto de las capacidades propuestas no debe interpretarse como implementado.
+
+El piloto desplegado sigue siendo la versión anterior a esta definición comercial. El trabajo local posterior sobre invitaciones individuales y una condición de pago se pausó para alinear el diseño; no está certificado ni desplegado y no sustituye el alta comercial confirmada. Esta revisión solo actualiza el documento y no incorpora esos cambios locales.
