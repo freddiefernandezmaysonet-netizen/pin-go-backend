@@ -25,6 +25,10 @@ Configuration is on the new pilot's private volume `/prime-data`, mode 0600. One
 
 Conversation history lives only in React memory in the current tab, resets on reload/sign-out/new trip, and is not stored on the server. At most 12 recent turns (1,600 characters each) accompany a message, plus the current structured criteria. User and assistant history are untrusted context; property facts come from the server. Replies may use the prior conversation without asking again for known criteria. Missing features mean unconfirmed, not absent. Current pilot limitations (Demo only, no distance data, no commercial bookings) remain explicit.
 
+Saved trip plans are an explicit opt-in via **Guardar viaje / Save trip**. Only the title and typed criteria persist in `/prime-data/saved-trips.json`, with versioned schema, mode 0600, atomic replacement and a 20-plan limit. Chat history, result cards, quotes, reservation/access data and credentials are never saved in a plan. The store is bound to the existing single `prime-pilot-founder` identity and expires from access with that pilot; this is not a multi-member production account system. Saving, editing and deleting require the existing signed session and same-origin policy. A corrupt or wrong-member file fails closed instead of being replaced. Identical retried creates return the existing plan.
+
+**Mis viajes** distinguishes planning ideas from confirmed bookings. Reopening a plan clears transient chat/results and calls the existing validated search again with the saved criteria, so dates, availability and quotes are current. These operations make no OpenAI calls and never create or alter reservations. Future multi-member rollout requires a tenant-scoped database-backed account/store design; the single-process pilot store must not be reused for that rollout.
+
 Required service variables: `DATABASE_URL` (reference to the existing database), `NODE_ENV=production`, `PRIME_DATA_DIR=/prime-data`; temporary `PRIME_BOOTSTRAP_SHA256` only for initial setup. The persistent volume is isolated to this service. No production credentials are copied into source or published artifacts.
 
 Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Git-ignored. Run `PRIME_PILOT_URL=https://<the-created-service>.up.railway.app node --env-file=.env.prime.local prime-pilot/provision.mjs`. The helper prints only status. Never run it against an unverified destination. Do not regenerate keys on a setup retry.
@@ -32,7 +36,7 @@ Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Gi
 ## Validation
 
 ```
-node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts prime-pilot/property-facts.test.ts
+node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts prime-pilot/property-facts.test.ts prime-pilot/saved-trips.test.ts
 npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --esModuleInterop prime-pilot/search.ts prime-pilot/catalog.ts prime-pilot/app.ts prime-pilot/server.ts
 npm ci --prefix prime-pilot
 npm run typecheck --prefix prime-pilot

@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from '
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import { criteriaSchema, emptyCriteria, historySchema, interpret, composeReply, fallbackReply, eligible, searchCatalog, validateStay, type ConversationFacts } from './search.js';
+import { hasTripDetails, savedTripStore, tripIdSchema, tripInputSchema } from './saved-trips.js';
 
 export function createPilotApp(options: { dataDir: string; bootstrapHash?: string; production: boolean; catalog: Parameters<typeof searchCatalog>[1]; interpret?: typeof interpret; composeReply?: typeof composeReply }) {
 const { dataDir, catalog } = options;
@@ -62,6 +63,31 @@ app.use('/api', (req, res, next) => {
 });
 app.delete('/api/session', (_req, res) => { res.clearCookie('prime_session', { path: '/api' }); res.json({ ok: true }); });
 app.get('/api/member', (_req, res) => res.json({ name: 'Freddie', status: 'PILOT', expiresAt: config!.expiresAt, cardStatus: 'NFC_PILOT_VERIFIED', activeAccesses: 0, trips: [] }));
+const plans = savedTripStore(dataDir);
+app.get('/api/saved-trips', (_req, res) => {
+  try { res.json({ trips: plans.list() }); }
+  catch { res.status(503).json({ error: 'SAVED_TRIPS_UNAVAILABLE' }); }
+});
+function saveTrip(req: express.Request, res: express.Response) {
+  const parsed = tripInputSchema.safeParse(req.body);
+  const id = req.params.tripId;
+  if (!parsed.success || (id && !tripIdSchema.safeParse(id).success)) return void res.status(400).json({ error: 'INVALID_TRIP' });
+  if (!hasTripDetails(parsed.data.criteria)) return void res.status(400).json({ error: 'EMPTY_TRIP' });
+  try {
+    const result = plans.save(parsed.data, id);
+    if (result.error) return void res.status(result.error === 'TRIP_NOT_FOUND' ? 404 : 409).json({ error: result.error });
+    res.status(result.created ? 201 : 200).json({ trip: result.trip });
+  } catch { res.status(503).json({ error: 'SAVED_TRIPS_UNAVAILABLE' }); }
+}
+app.post('/api/saved-trips', saveTrip);
+app.put('/api/saved-trips/:tripId', saveTrip);
+app.delete('/api/saved-trips/:tripId', (req, res) => {
+  if (!tripIdSchema.safeParse(req.params.tripId).success) return void res.status(400).json({ error: 'INVALID_TRIP' });
+  try {
+    if (!plans.remove(req.params.tripId)) return void res.status(404).json({ error: 'TRIP_NOT_FOUND' });
+    res.json({ ok: true });
+  } catch { res.status(503).json({ error: 'SAVED_TRIPS_UNAVAILABLE' }); }
+});
 const requestSchema = z.object({ message: z.string().trim().min(1).max(1600).optional(), criteria: criteriaSchema.default(emptyCriteria), history: historySchema.default([]), language: z.enum(['es', 'en']).default('es') }).strict();
 let busy = false;
 app.post('/api/search', async (req, res) => {

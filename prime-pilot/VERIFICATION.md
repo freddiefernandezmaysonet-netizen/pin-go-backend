@@ -48,3 +48,12 @@ Production `OPENAI_API_KEY`, public booking settings, production API routes, wor
 - Live authenticated read returned Demo’s published facts: 1 bedroom, 1 full bathroom, pool privacy unconfirmed, no nearby places recorded, and included pool/Wi-Fi/hot tub/air conditioning/parking/pets/entire-place features. The existing canonical quote was USD 6.69 for the three-night test; older clients without the new minimum fields remain compatible.
 - A live question correctly answered the bedroom/bathroom counts and said it could not confirm pool privacy or a five-minute walk to the beach. A conversational follow-up requiring at least 2 bedrooms preserved dates, 2 adults and USD 500, produced NO_MATCHES and the `bedrooms` exclusion reason. No narration fallback occurred.
 - Synthetic model check separately distinguished a shared pool, 1 full plus 2 half bathrooms, and a host-reported five-minute trip with unknown travel mode. This synthetic example does not describe the actual Demo property.
+
+## Explicit saved trip plans — October 27
+
+- Added opt-in save/update/remove for the single pilot member, using typed criteria and a title only. Plans are visibly PLANNING, with no reservation or held-price claim. The chat transcript is not persisted.
+- The private volume stores up to 20 plans using schema validation, member binding, mode 0600 and atomic file replacement. Existing session and same-origin controls cover all plan endpoints. No database mutations or additional AI calls are introduced.
+- Resuming a plan clears stale chat/results and submits its requirements to the existing search. Incomplete/past dates still go through the same date validation; current availability and pricing are queried when criteria are complete.
+- Seventeen API/search/evidence/store test groups and two React interaction tests passed. New coverage: persisted plans after a fresh store/page, retry deduplication, updates at capacity, isolated deletion, corrupt/wrong-member file protection, private API access, cross-origin rejection, forbidden quote/history fields, fresh search on resume, edit/save and removal confirmation.
+- Strict API/client TypeScript checks and the production Vite build passed. UI coverage is DOM interaction; authenticated desktop/mobile visual certification remains pending.
+- Deployment and live save/resume checks pending at this commit.

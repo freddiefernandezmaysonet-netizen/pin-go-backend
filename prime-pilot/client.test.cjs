@@ -10,6 +10,7 @@ test('React UI holds a conversation, sends context, edits details, resets and si
   let searches = 0; let logouts = 0;
   dom.window.fetch = async (url, options) => ({ ok: true, json: async () => {
     if (url.endsWith('/member')) return { name: 'Freddie' };
+    if (url.endsWith('/saved-trips')) return { trips: [] };
     if (url.endsWith('/session') && options.method === 'DELETE') { logouts++; return { ok: true }; }
     searches++; const body = JSON.parse(options.body); assert.equal(body.language, 'es');
     if (searches === 1) { assert.ok(body.message.includes('Puerto Rico')); assert.deepEqual(body.history, []); }
@@ -57,4 +58,62 @@ test('React UI holds a conversation, sends context, edits details, resets and si
     assert.equal(dom.window.document.querySelector('input[type=date]'), null);
     click('Cerrar sesión'); await wait(() => text().includes('Código de invitación')); assert.equal(logouts, 1);
   } finally { dom.window.close(); }
+});
+
+test('saved-trip UI survives a fresh page, resumes with fresh search, updates and removes a plan', async () => {
+  const bundle = await build({ entryPoints: [path.join(__dirname, 'client/main.tsx')], bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', loader: { '.css': 'empty' }, define: { 'process.env.NODE_ENV': '"production"' } });
+  const plannedCriteria = { ...criteria, preferences: ['private_pool'], unsupported: ['cerca de la playa'] };
+  let saved = []; let searches = 0; let updates = 0; let dom;
+  const wait = async fn => { for (let n = 0; n < 100; n++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('saved-trip UI timeout'); };
+  const text = () => dom.window.document.body.textContent;
+  const click = label => { const button = [...dom.window.document.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label); assert.ok(button, label); button.click(); };
+  const value = (input, text) => { const prototype = input.tagName === 'TEXTAREA' ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value').set.call(input, text); input.dispatchEvent(new dom.window.Event('input', { bubbles: true })); };
+  const open = async () => {
+    dom = new JSDOM('<!doctype html><div id="root"></div>', { url: 'http://prime.test/', runScripts: 'outside-only' });
+    dom.window.AbortSignal.timeout = () => new dom.window.AbortController().signal;
+    dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
+    dom.window.fetch = async (url, options) => ({ ok: true, json: async () => {
+      if (url.endsWith('/member')) return { name: 'Freddie' };
+      if (url.includes('/saved-trips')) {
+        if (options.method === 'GET') return { trips: JSON.parse(JSON.stringify(saved)) };
+        if (options.method === 'DELETE') { saved = []; return { ok: true }; }
+        const body = JSON.parse(options.body); assert.deepEqual(Object.keys(body).sort(), ['criteria', 'title']);
+        if (options.method === 'PUT') { updates++; assert.ok(url.endsWith(saved[0].id)); }
+        const trip = { ...body, id: '4f9093ad-c2cd-45a7-8bbb-b51233b22a6a', status: 'PLANNING', createdAt: '2026-10-27T12:00:00Z', updatedAt: '2026-10-27T12:00:00Z' };
+        saved = [trip]; return { trip };
+      }
+      assert.ok(url.endsWith('/search')); searches++;
+      const body = JSON.parse(options.body);
+      if (searches > 1) { assert.deepEqual(body.criteria, plannedCriteria); assert.equal(body.message, undefined); assert.deepEqual(body.history, []); }
+      return { criteria: plannedCriteria, clarification: null, missing: [], results: [], failed: 0, status: 'NO_MATCHES', reply: searches === 1 ? 'Mantengo tus requisitos de piscina y playa.' : 'Opciones consultadas de nuevo para tu viaje.', replyFallback: false };
+    } });
+    dom.window.eval(bundle.outputFiles[0].text);
+    await wait(() => text().includes('Tu próxima estancia'));
+  };
+  try {
+    await open(); value(dom.window.document.querySelector('textarea'), 'Quiero piscina privada cerca de la playa.');
+    await wait(() => !dom.window.document.querySelector('button[aria-label="Enviar a Pin AI"]').disabled);
+    click('Enviar a Pin AI'); await wait(() => text().includes('Mantengo tus requisitos'));
+    click('Guardar viaje'); await wait(() => dom.window.document.getElementById('prime-plan-title'));
+    value(dom.window.document.getElementById('prime-plan-title'), 'Escapada de playa');
+    await wait(() => dom.window.document.getElementById('prime-plan-title').value === 'Escapada de playa');
+    click('Guardar en Mis viajes'); await wait(() => text().includes('Guardado en Mis viajes.'));
+    assert.deepEqual(saved[0].criteria, plannedCriteria); assert.equal(searches, 1);
+    dom.window.close(); await open(); // Fresh React state; only the API record survives.
+    click('Mis viajes'); await wait(() => text().includes('Escapada de playa'));
+    assert.ok(text().includes('Sin reservación ni precio retenido')); assert.ok(text().includes('cerca de la playa'));
+    click('Retomar viaje'); await wait(() => text().includes('Opciones consultadas de nuevo'));
+    assert.equal(searches, 2); assert.equal(dom.window.document.querySelectorAll('.prime-turn-user').length, 1);
+    click('Guardar cambios del viaje'); await wait(() => dom.window.document.getElementById('prime-plan-title'));
+    value(dom.window.document.getElementById('prime-plan-title'), 'Viaje actualizado');
+    await wait(() => dom.window.document.getElementById('prime-plan-title').value === 'Viaje actualizado');
+    click('Guardar en Mis viajes'); await wait(() => updates === 1 && text().includes('Guardado en Mis viajes.'));
+    assert.equal(saved.length, 1); assert.equal(saved[0].title, 'Viaje actualizado');
+    click('Mis viajes'); await wait(() => text().includes('Viaje actualizado'));
+    click('Eliminar plan Viaje actualizado'); await wait(() => text().includes('Confirmar eliminación'));
+    click('Cancelar'); await wait(() => !text().includes('Confirmar eliminación')); assert.equal(saved.length, 1);
+    click('Eliminar plan Viaje actualizado'); await wait(() => text().includes('Confirmar eliminación'));
+    click('Confirmar eliminación'); await wait(() => text().includes('Tu próxima historia empieza aquí.'));
+    assert.equal(saved.length, 0); assert.equal(searches, 2);
+  } finally { dom?.window.close(); }
 });

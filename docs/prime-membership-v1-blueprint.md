@@ -94,4 +94,4 @@ Pin AI interpreta y explica. Las funciones del servidor deciden elegibilidad, di
 - No se emite un acceso NFC desde la búsqueda; una reserva elegible inicia el permiso con las fechas correctas.
 - Modificaciones, cancelación y pérdida de tarjeta se reflejan en el permiso con estado real del proveedor; una revocación pendiente no se muestra como completada.
 
-Este documento registra el diseño acordado. El piloto aislado usa conversación contextual, disponibilidad y cotización de Demo en modo de solo lectura; su evidencia de verificación está en `prime-pilot/VERIFICATION.md`. El resto de las capacidades propuestas no debe interpretarse como implementado.
+Este documento registra el diseño acordado. El piloto aislado usa conversación contextual, planes de viaje guardados por elección del miembro, disponibilidad y cotización de Demo con la base de datos en modo de solo lectura; su evidencia de verificación está en `prime-pilot/VERIFICATION.md`. El resto de las capacidades propuestas no debe interpretarse como implementado.
