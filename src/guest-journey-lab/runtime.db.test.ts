@@ -47,9 +47,15 @@ test("real E4/E7 persists claims, simulated receipts and uncertain results witho
     // Persisted receipts survive a lost connection before reconciliation.
     await lab.prisma.$disconnect();
     await lab.prisma.$connect();
-    await assert.rejects(reconcile(lab.prisma, input, { persistAudit: async () => {
-      throw new Error("SIMULATED_AUDIT_WRITE_FAILURE");
-    } }), /SIMULATED_AUDIT_WRITE_FAILURE/);
+    await assert.rejects(async () => {
+      const result = await reconcile(lab.prisma, input, { persistAudit: async () => {
+        throw new Error("SIMULATED_AUDIT_WRITE_FAILURE");
+      } });
+      const evidence = await lab.prisma.messageLog.findUnique({ where: { id: acknowledgement.id },
+        select: { provider: true, status: true, providerMessageId: true, providerDeliveryStatus: true,
+          providerStatusUpdatedAt: true, deliveredAt: true } });
+      throw new Error(`RECOVERY_DID_NOT_REACH_AUDIT:${JSON.stringify({ result, evidence })}`);
+    }, /SIMULATED_AUDIT_WRITE_FAILURE/);
     assert.equal((await lab.prisma.guestJourneyCoordinationIntent.findUniqueOrThrow({ where: { id: late.id } })).status, "WAITING_FOR_EVIDENCE");
     assert.equal((await lab.prisma.messageLog.findUniqueOrThrow({ where: { id: acknowledgement.id } })).status, "E7_SENDING");
     const race = await Promise.allSettled([reconcile(lab.prisma, input), reconcile(lab.prisma, input)]);
