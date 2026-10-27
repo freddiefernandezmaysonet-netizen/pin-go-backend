@@ -1,0 +1,8 @@
+{
+  "name": "pin-go-prime-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "vite build", "dev": "vite --host 0.0.0.0", "typecheck": "tsc --noEmit --strict --skipLibCheck --module ESNext --moduleResolution Bundler --target ES2022 --jsx react-jsx --lib ES2022,DOM --types node client/main.tsx" },
+  "dependencies": { "react": "19.2.0", "react-dom": "19.2.0", "lucide-react": "0.577.0" },
+  "devDependencies": { "vite": "7.3.1", "@vitejs/plugin-react": "5.1.1", "@types/react": "19.2.7", "@types/react-dom": "19.2.3", "typescript": "5.9.3", "@types/node": "24.10.1" }
+}
