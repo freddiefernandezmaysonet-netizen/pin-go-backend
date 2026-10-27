@@ -23,6 +23,8 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
 | Primera tarjeta y envío | Incluidos en la membresía, sin cargo adicional para el miembro. |
 | Reemplazo por extravío | USD 5 por reemplazar una tarjeta extraviada. |
+| Cancelación de membresía | Sin permanencia mínima; conserva beneficios hasta terminar el período ya pagado. |
+| Reservaciones ya confirmadas | Conservan el precio acordado y el acceso correspondiente a la estancia aunque se cancele la renovación de Prime. |
 
 La venta de la membresía debe conservar el origen de adquisición y el anfitrión correspondiente para atribuir las mensualidades. La comisión remunera esa adquisición; el descuento beneficia al huésped al reservar alojamiento participante. El documento no define aún las reglas para una suscripción cancelada que se reactiva, los ajustes por reembolsos ni la liquidación de comisiones.
 
@@ -71,32 +73,34 @@ Detalles técnicos propuestos para implementar el alta, aún sin activar:
 
 La cuenta, la suscripción, el envío de la tarjeta y los permisos de cada estancia tendrán estados separados para mostrar al miembro qué está realmente listo.
 
-## Ciclo de suscripción: propuesta pendiente de decisión
+## Ciclo de suscripción: decisiones confirmadas y detalles propuestos
 
-Esta tabla organiza el siguiente punto de diseño. Las reglas de cancelación, renovación fallida y conservación de beneficios en reservas existentes **todavía no han sido aceptadas por el fundador**.
+El fundador confirmó la cancelación sin permanencia mínima, la conservación de beneficios hasta terminar el período pagado y el respeto al precio y acceso de las reservaciones ya confirmadas. La tabla distingue esas decisiones de los detalles operativos todavía propuestos.
 
-| Situación | Comportamiento propuesto |
-| --- | --- |
-| Primer pago confirmado | Enviar la bienvenida y permitir completar el registro. |
-| Membresía vigente | Mostrar fecha de próxima renovación y beneficios disponibles. Renovación mensual automática, con las condiciones mostradas antes de comprar. |
-| El miembro cancela la renovación | Permitir cancelación sin permanencia mínima; conservar beneficios hasta terminar el período ya pagado. Mostrar la fecha exacta de finalización. |
-| Falla una renovación | Avisar y permitir actualizar el método de pago. Respetar el período previamente pagado; al vencer, suspender beneficios para nuevas reservas. Reintentos y cualquier período de gracia quedan por definir. |
-| La membresía vence | Mantener acceso a cuenta, recibos, viajes existentes y reactivación; restringir nuevos beneficios Prime hasta un nuevo pago confirmado. |
-| Ya existen reservaciones confirmadas | Conservar el precio aceptado y el acceso correspondiente a esas estancias, sin cancelarlas ni retirar su acceso por cancelar la renovación de Prime. Cambios posteriores y nuevas reservas requieren sus propias validaciones. |
+| Situación | Comportamiento | Estado de diseño |
+| --- | --- | --- |
+| Primer pago confirmado | Enviar la bienvenida y permitir completar el registro. | Confirmado. |
+| Membresía vigente | Mostrar fecha de próxima renovación y beneficios disponibles. Renovación mensual automática, con las condiciones mostradas antes de comprar. | Recorrido operativo propuesto. |
+| El miembro cancela la renovación | Permitir cancelación sin permanencia mínima; conservar beneficios hasta terminar el período ya pagado. Mostrar la fecha exacta de finalización. | Regla comercial confirmada. |
+| Falla una renovación | Avisar y permitir actualizar el método de pago. Respetar el período previamente pagado; al vencer, suspender beneficios para nuevas reservas. Reintentos y cualquier período de gracia quedan por definir. | Recorrido de recuperación propuesto. |
+| La membresía vence | Mantener acceso a cuenta, recibos, viajes existentes y reactivación; restringir nuevos beneficios Prime hasta un nuevo pago confirmado. | Recorrido de cuenta propuesto; los viajes confirmados están protegidos por la regla siguiente. |
+| Ya existen reservaciones confirmadas | Conservar el precio aceptado y el acceso correspondiente a esas estancias, sin cancelarlas ni retirar su acceso por cancelar la renovación de Prime. Cambios posteriores y nuevas reservas requieren sus propias validaciones. | Regla comercial confirmada. |
 
-La propuesta permite distinguir «cancelar la próxima renovación» de «cancelar una reservación». El envío inicial de tarjeta no impone una permanencia mínima no acordada. La comisión del anfitrión sigue vinculada a mensualidades efectivamente pagadas; los ajustes por reembolsos y disputas continúan pendientes.
+Cancelar la próxima renovación de Prime conserva las reservaciones confirmadas. La primera tarjeta y su envío incluidos no imponen permanencia mínima. La comisión del anfitrión sigue vinculada a mensualidades efectivamente pagadas; los ajustes por reembolsos y disputas continúan pendientes.
+
+Al implementar, las condiciones aceptadas de una reservación deberán conservarse para respetar su precio y acceso aunque la membresía venza antes o durante la estancia. Una comprobación genérica de «membresía vigente ahora» no debe retirar ese derecho ya adquirido. Siguen aplicando los controles propios de la reservación, la identidad, la tarjeta y el horario autorizado. El código local preliminar de condición de pago deberá alinearse con esta regla antes de cualquier integración con accesos.
 
 ## Tarjeta personal y envío: alcance del diseño
 
 La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **la primera tarjeta y su envío están incluidos en la membresía, sin cargo adicional**. Si el miembro extravía la tarjeta, se cobra **USD 5 por el reemplazo**. Quedan por definir los destinos atendidos y la logística de entrega y reposición. El cargo acordado corresponde a extravío; los casos de defecto, daño o pérdida durante el transporte no están definidos por esta decisión.
 
-El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. El comportamiento cuando la membresía vence durante una estancia ya pagada sigue pendiente de decisión; la sección de ciclo de suscripción propone conservar esa estancia y su acceso. Este documento no autoriza retirar el acceso a una reservación existente por una regla comercial todavía no acordada.
+El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. Está confirmado que cancelar la renovación o vencer la membresía no elimina el precio ni el acceso correspondientes a reservaciones ya confirmadas. El permiso físico continúa sujeto a la validez de esa reservación y a su horario autorizado.
 
 ## Decisiones pendientes, en orden de diseño
 
 1. **Entrega de la tarjeta:** definir destinos cubiertos y logística de entrega. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
-3. **Suscripción:** cancelación, renovación fallida, recuperación y tratamiento de viajes ya reservados.
+3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
 5. **Descuento:** configuración por propiedad o común al anfitrión; combinación con otras promociones y cambios aplicables a reservas existentes. La obligatoriedad, rango 5–20% y base de alojamiento por noche ya están confirmados.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
