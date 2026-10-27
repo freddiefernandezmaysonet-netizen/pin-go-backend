@@ -103,10 +103,49 @@ El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y e
 2. **Precio definitivo:** confirmar o ajustar la propuesta de USD 9.99 mensuales.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
-5. **Descuento:** combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
+5. **Descuento y compra:** confirmar si una membresía adquirida durante el checkout permite usar el descuento en esa misma reserva; definir combinación con otras promociones y tratamiento de modificaciones de una reserva. Ya están confirmados la configuración independiente por propiedad, la obligatoriedad, el rango 5–20%, la base de alojamiento por noche y la conservación del precio de las reservas confirmadas.
 6. **Tarjeta:** vinculación, recepción, reporte de pérdida, proceso de reposición y tratamiento de permisos pendientes o activos. El precio del reemplazo por extravío ya está definido; quedan pendientes las reglas para defectos, daños o pérdida durante el transporte.
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
+
+## Compra desde la página de reservas: propuesta pendiente
+
+La compra de Prime desde páginas de reserva está confirmada. La aplicación del descuento a la misma reserva en la que se adquiere la membresía es la siguiente decisión propuesta, todavía pendiente de aceptación explícita.
+
+### Presentación al huésped
+
+En una propiedad participante, después de seleccionar fechas y antes de confirmar el pago, mostrar:
+
+- Precio regular de la estancia, calculado por el servidor.
+- Porcentaje Prime configurado en esa propiedad y descuento sobre el subtotal de noches.
+- Precio de la estancia con Prime, con limpieza, cargos e impuestos desglosados.
+- Primera mensualidad de Prime, separada del importe de la reservación, y las condiciones de renovación/cancelación.
+- Importe a pagar hoy y comparación con la alternativa regular, usando cotizaciones completas y actuales.
+
+Recorridos propuestos:
+
+| Tipo de cliente | Acción y resultado propuestos |
+| --- | --- |
+| Miembro vigente | Se identifica con su cuenta. Se comprueba la membresía y se aplica el porcentaje de esa propiedad; no se cobra otra primera mensualidad. |
+| Nuevo miembro | Elige expresamente añadir Prime. Al confirmarse el pago de la membresía, puede usar el descuento en esa misma reserva, si el fundador acepta esta regla. Recibe el email de bienvenida para crear contraseña y completar su registro y dirección. |
+| Cliente que no elige Prime | Continúa con la cotización regular. |
+| Cuenta Prime existente sin vigencia | Se verifica la cuenta y se ofrece reactivarla, conservando su historial; la reactivación y las comisiones asociadas requieren sus reglas pendientes. |
+
+Ejemplo ilustrativo usando el precio mensual todavía propuesto de USD 9.99, sin impuestos ni otros cargos: tres noches de USD 150 suman USD 450 de alojamiento; 10% Prime descuenta USD 45; el alojamiento con Prime queda en USD 405 y, al añadir la primera mensualidad, suma USD 414.99. La diferencia de ese ejemplo es USD 35.01. Los cargos y los impuestos del caso real deben incluirse en las cotizaciones antes de mostrar un ahorro total.
+
+Si la mensualidad supera el ahorro inmediato, la pantalla debe mostrar los importes reales y permitir elegir; no debe afirmar que siempre se ahorra dinero en esa compra. El precio USD 9.99 no se convierte en definitivo por utilizarlo en este ejemplo.
+
+### Coordinación propuesta del recorrido
+
+La suscripción y la reservación conservan su identidad, importes y confirmaciones de pago. La experiencia debe permitir continuar desde el alta de Prime hacia la reserva sin repetir innecesariamente datos ya proporcionados. Si una persona ya es miembro, escribir un correo por sí solo no acredita la titularidad de su cuenta.
+
+Antes de confirmar la reservación se vuelven a comprobar disponibilidad, precio, afiliación de la propiedad y elegibilidad Prime. Si la membresía se pagó pero la reserva no se completa, deben mostrarse ambos estados y un recorrido de recuperación; aún falta definir la resolución comercial de ese caso. Esta propuesta no promete un cobro único ni define todavía la coordinación concreta de pagos.
+
+### Evidencia de la revisión del checkout actual
+
+- `src/routes/public-booking.routes.ts` contiene `/quote`, que usa `calculateDirectBookingPricing`, y `/create-checkout`, que vuelve a consultar disponibilidad y precio. El checkout revisado usa un pago de reservación (`mode: payment`); la suscripción recurrente Prime necesita una integración específica.
+- `src/pages/public-booking/PublicPropertyDetailPage.tsx`, en la copia del dashboard revisada, consulta `/api/public-booking/quote` y muestra noches, limpieza, amenidades e impuestos. Esos son los puntos de presentación propuestos para el desglose Prime.
+- La revisión es de código. No se crearon productos, precios, suscripciones, pagos, reservas ni cambios de checkout en producción.
 
 ## Experiencia del anfitrión: propuesta de pantalla
 
