@@ -98,6 +98,44 @@ La tarjeta física personal reutilizable sigue formando parte de Prime y ya exis
 
 El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. Está confirmado que cancelar la renovación o vencer la membresía no elimina el precio ni el acceso correspondientes a reservaciones ya confirmadas. El permiso físico continúa sujeto a la validez de esa reservación y a su horario autorizado.
 
+### Recorrido operativo propuesto de la tarjeta
+
+La primera tarjeta incluida, el envío sin cargo y el reemplazo de USD 5 por extravío son decisiones confirmadas. La siguiente secuencia concreta su operación como propuesta para implementación futura.
+
+| Etapa | Recorrido propuesto | Qué ve el miembro |
+| --- | --- | --- |
+| Preparación | Después del pago confirmado y del registro con dirección completa, crear una solicitud de primera tarjeta y asociar una tarjeta disponible al miembro. Repetir la confirmación del mismo pago no crea otro envío. | «Tarjeta en preparación · tarjeta y envío incluidos». |
+| Envío | Registrar el despacho efectivo, destino, fecha y seguimiento cuando exista. El tiempo estimado se muestra solo cuando la operación logística pueda respaldarlo. | «Tarjeta enviada» y seguimiento disponible. |
+| Recepción | Permitir al miembro autenticado confirmar que recibió la tarjeta vinculada a su cuenta. Distinguir esta declaración de una entrega registrada por el transportista. La confirmación de recepción no crea permisos de cerradura. | «Tarjeta recibida» y detalle de sus próximas estancias. |
+| Reserva elegible | Verificar la vinculación de la reserva, las condiciones de pago e identidad aplicables, la compatibilidad del alojamiento y la tarjeta. Preparar el permiso para la ventana autorizada de esa estancia. | Propiedad, fechas, horario local y estado real del permiso. |
+| Durante la estancia | Permitir el uso físico únicamente durante el horario autorizado y cuando la programación haya sido confirmada. Una modificación de fechas requiere actualizar y verificar el permiso correspondiente. | «Acceso confirmado para esta estancia», con inicio y fin. |
+| Fin de la estancia | Finalizar el permiso de esa reservación. Conservar la tarjeta personal y su vínculo con el miembro para los viajes siguientes. | «Acceso de esta estancia finalizado»; la tarjeta sigue en su cuenta. |
+
+La preparación de la tarjeta y la búsqueda de alojamiento son recorridos independientes: con la membresía vigente, el miembro puede buscar y reservar mientras espera la entrega. Si la estancia comienza antes de recibirla, solo se debe ofrecer un medio alternativo de acceso que ya esté habilitado y verificado para esa reserva y propiedad; la tarjeta en tránsito no equivale a acceso NFC listo. La afiliación a Prime y la compatibilidad NFC se muestran por separado.
+
+La programación anticipada debe integrarse con la política existente de accesos; programar antes no adelanta el horario de entrada del huésped. La finalización por fecha prevista, una revocación por cancelación y una revocación por pérdida son hechos distintos y deben conservar su evidencia. No se debe declarar una revocación remota completada mientras siga pendiente de confirmación.
+
+### Extravío y reposición: secuencia propuesta
+
+1. El miembro entra a «Mi tarjeta» y reporta el extravío. Se identifica la tarjeta afectada y se muestra el efecto de la acción antes de confirmarla.
+2. El sistema impide nuevas programaciones con esa tarjeta, cancela trabajos pendientes y solicita la revocación de los permisos que puedan seguir vigentes. También debe resolver programaciones que estuvieran en curso al recibir el reporte. El estado distingue «Pérdida reportada / bloqueo pendiente» de la revocación confirmada por las cerraduras afectadas.
+3. Si hay una estancia en curso o próxima, presentar asistencia y el acceso alternativo únicamente cuando esté verificado. El reporte no cancela la reserva ni depende de pagar el reemplazo.
+4. Ofrecer «Solicitar reemplazo · USD 5», confirmar la dirección de envío y solicitar el pago expresamente. Una confirmación de pago repetida mantiene la misma solicitud de reposición.
+5. Asociar una nueva tarjeta al mismo miembro y a las reservas que sigan siendo elegibles, validando de nuevo ventanas y permisos. La tarjeta anterior queda excluida de nuevas asignaciones; encontrarla después no la reactiva automáticamente.
+
+Los plazos, el transportista, los destinos y el tratamiento de daño, defecto o pérdida en tránsito siguen pendientes. El cargo de USD 5 corresponde al extravío por el miembro y no resuelve esos otros casos. La cobertura de envío debe estar visible antes de comprar para que el cliente compruebe que incluye su destino; la dirección completa se solicita durante el registro inicial, como ya se acordó.
+
+### Evidencia técnica que condiciona la integración
+
+Revisión de la copia de backend `af10a9d9191480d6b5b65f902abeb41859ece21a`, sin ejecutar operaciones de acceso:
+
+- `prisma/schema.prisma`: `NfcCard` pertenece a una propiedad y contiene `ttlockCardId`; `NfcAssignment` vincula esa tarjeta con una reserva y una ventana. El modelo revisado no contiene el vínculo de la tarjeta personal Prime con el miembro ni el proceso de envío.
+- `src/services/nfc.service.ts`: `assignNfcCards` selecciona tarjetas disponibles por propiedad y por etiquetas `Guest-` o `Cleaning Service-`. Las funciones `unassignAllNfcForReservation` y `unassignGuestNfcForReservation` revisadas finalizan asignaciones activas y devuelven la tarjeta al estado `AVAILABLE`.
+- Prime necesita conservar la titularidad de la tarjeta después de cada estancia y mantener las asociaciones necesarias por cerradura. No se debe incorporar una tarjeta personal al ciclo de devolución al inventario de la propiedad ni asumir que el identificador del proveedor es universal entre cerraduras.
+- El reporte de extravío debe cubrir permisos activos, programaciones pendientes y operaciones en curso. Las funciones revisadas que seleccionan solo asignaciones `ACTIVE` no constituyen por sí solas ese proceso completo.
+
+La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tarjeta personal, envío y reposición descrito aquí todavía requiere implementación y certificación.
+
 ## Decisiones pendientes, en orden de diseño
 
 1. **Entrega de la tarjeta:** definir destinos cubiertos y logística de entrega. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
