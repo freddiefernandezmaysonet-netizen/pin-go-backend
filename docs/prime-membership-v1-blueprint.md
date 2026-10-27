@@ -107,6 +107,44 @@ El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y e
 
 Estas decisiones completan el diseño; no habilitan cobros, comisiones, envío de correos ni cambios de acceso en producción.
 
+## Experiencia del anfitrión: propuesta de pantalla
+
+Esta sección concreta el diseño del dashboard del anfitrión. La obligatoriedad del descuento de 5–20% sobre alojamiento y la comisión recurrente de 40% están confirmadas. La ubicación de los controles y la posibilidad de elegir porcentajes diferentes por propiedad son propuestas pendientes de decisión.
+
+### Participación y beneficios
+
+Propuesta: añadir «Pin&Go Prime» a la configuración del alojamiento con estos controles:
+
+| Elemento | Comportamiento propuesto |
+| --- | --- |
+| Participación | Incorporar expresamente el alojamiento a Prime o pausar su participación para nuevas reservas. |
+| Descuento Prime | Seleccionar entre 5% y 20%, obligatorio para activar la participación. Mostrar que se aplica únicamente al alojamiento por noche. |
+| Otros beneficios | Preparar las opciones adicionales y sus condiciones cuando se definan; no anunciar borradores como beneficios activos. |
+| Resumen de condiciones | Mostrar la participación y el descuento guardados, con fecha de actualización. |
+| Reservas anteriores | Conservar el precio acordado de las reservas ya confirmadas al cambiar el porcentaje o pausar nuevas ofertas. |
+
+Se propone permitir un porcentaje distinto en cada propiedad, ya que un anfitrión puede querer ofrecer condiciones diferentes según el alojamiento. Ejemplo ilustrativo: una propiedad con 5% y otra con 15%. El fundador debe decidir entre esa opción y un porcentaje común para todas sus propiedades antes de implementar el control.
+
+Los canales de compra de membresías ya acordados se mantienen. Registrar una venta de membresía desde una página del anfitrión debe conservar su atribución comercial; la participación de un alojamiento en el catálogo requiere su configuración explícita de Prime.
+
+### Comisiones de membresías
+
+Propuesta: una sección «Mis comisiones Prime» en el dashboard del anfitrión, agregada para su organización:
+
+- Membresías originadas en sus páginas y cantidad que continúa activa.
+- Mensualidades efectivamente pagadas por esos referidos.
+- Comisión correspondiente del 40%, con historial por período.
+- Importe generado, pendiente de liquidación y efectivamente pagado, según evidencia del sistema.
+- Ajustes identificados por separado cuando se definan las políticas de reembolso y disputa.
+
+Esta vista debe calcular comisiones sobre pagos confirmados y registrar cada mensualidad una sola vez. Una estimación de ingresos futuros no se debe mostrar como dinero cobrado. La base exacta respecto a impuestos y costes de procesamiento, las reglas de redondeo y el calendario de liquidación siguen pendientes; el diseño de pantalla no los fija.
+
+### Base técnica revisada para ubicar estas funciones
+
+- Backend revisado: `af10a9d9191480d6b5b65f902abeb41859ece21a`. `Organization` ya contiene la asociación y el estado de Stripe Connect; `src/routes/dashboard-payouts.routes.ts` obtiene la organización de la sesión autenticada para las consultas de pagos del anfitrión.
+- Copia local del dashboard revisada: `701135729c34296e817060dc7fddf7c608fc2ae0`. Existen pantallas de configuración de propiedades, `src/components/payouts/HostPayoutsExperience.tsx` y contratos de estado de pagos en `src/api/payouts.ts`.
+- Esta es evidencia de estructura existente. La contabilidad de comisiones recurrentes de Prime y su liquidación todavía requieren una integración específica y validación; la revisión no creó cuentas, transferencias ni cambios en Stripe.
+
 ## Evidencia y punto de partida
 
 El piloto NFC autorizó remotamente en Demo una tarjeta registrada previamente en otra propiedad. El proveedor confirmó el alta temporal y la conservación de las tarjetas anteriores. El fundador confirmó por separado apertura física y rechazo después del vencimiento. Esto certifica ese recorrido en el equipo probado, no una integración de membresías en producción ni compatibilidad universal.
