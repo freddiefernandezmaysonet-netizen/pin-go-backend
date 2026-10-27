@@ -28,13 +28,15 @@ Local key file `.env.prime.local` and one-use `.env.prime-provision.json` are Gi
 ## Validation
 
 ```
-node --import tsx --test prime-pilot/search.test.ts
-npx tsc --noEmit --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --esModuleInterop prime-pilot/search.ts prime-pilot/catalog.ts prime-pilot/server.ts
+node --import tsx --test prime-pilot/search.test.ts prime-pilot/app.test.ts
+npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module ESNext --moduleResolution Bundler --esModuleInterop prime-pilot/search.ts prime-pilot/catalog.ts prime-pilot/app.ts prime-pilot/server.ts
 npm ci --prefix prime-pilot
 npm run typecheck --prefix prime-pilot
 npm run build --prefix prime-pilot
 ```
 
-Behavior tests cover allowlist enforcement, unavailable inventory, real total budget calculation, children/capacity/NFC/preferences, invalid dates and upstream failures. Browser checks should cover desktop/mobile overflow, invitation login, missing criteria, results, editable filters, empty/error states, details dialog, Spanish/English, navigation, and sign-out. Use explicitly marked synthetic fixtures only for local UI tests; live API checks use the Demo property.
+Behavior tests cover allowlist enforcement, unavailable inventory, real total budget calculation, children/capacity/NFC/preferences, invalid dates and upstream failures. HTTP tests exercise one-use setup, unauthenticated reads, forged sessions, cross-origin requests, persistent quota, cookie protections, and sign-out. Browser checks should cover desktop/mobile overflow, invitation login, missing criteria, results, editable filters, empty/error states, details dialog, Spanish/English, navigation, and sign-out. Use explicitly marked synthetic fixtures only for local UI tests; live API checks use the Demo property.
+
+Optional `PRIME_READONLY_CANARY=1` runs one fixed Demo search for November 6–9, 2026 (two adults) on startup after verifying read-only database mode. It logs only the test quote and result count, never guest/booking/conflict data. Disable after evidence collection.
 
 Disable the pilot by stopping its dedicated service. Production routes and workers are unchanged.
