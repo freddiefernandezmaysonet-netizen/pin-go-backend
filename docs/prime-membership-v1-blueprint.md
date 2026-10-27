@@ -6,6 +6,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 ## Decisiones del fundador
 
 - Prime es una membresía para viajeros con dashboard exclusivo.
+- El fundador pidió mantener el logo y el estándar visual de las páginas existentes del dashboard. Prime conserva la marca Pin&Go y añade la identificación de membresía.
 - El dashboard tendrá un buscador de propiedades disponibles que acepten Prime.
 - Pin AI será la interfaz principal de búsqueda: conversación, resultados visuales y refinamiento.
 - Una tarjeta física personal reutilizable es uno de los beneficios previstos.
@@ -58,6 +59,27 @@ El registro inicial incluye:
 | Dirección de envío | Calle y número; apartamento/unidad si aplica; ciudad; estado, provincia o región; código postal cuando corresponda; país. |
 
 La dirección se solicita **durante el registro inicial**, según la aclaración expresa del fundador, para poder enviar la tarjeta física de acceso. Idioma y preferencias de viaje pueden completarse después desde el dashboard.
+
+### Pantallas de activación: propuesta de presentación
+
+Esta propuesta concreta el registro confirmado en dos pasos dentro del alta inicial. Se presenta con el logo oficial, la tipografía, el azul y los controles del dashboard existente, identificada como «Pin&Go Prime». Los textos y la distribución siguientes son una propuesta de interfaz, todavía sin implementar.
+
+| Momento | Contenido y acción |
+| --- | --- |
+| Email posterior al pago confirmado | Asunto: «Bienvenido a Pin&Go Prime». Mostrar el plan contratado y el botón «Crear mi contraseña», con el enlace personal de activación. |
+| Paso 1 de 2 · Tu cuenta | Título «Activa tu cuenta Prime». Nombre y apellidos, correo de compra ya cargado, teléfono con código de país y nueva contraseña con control para mostrarla. Acción: «Continuar». |
+| Paso 2 de 2 · Tu tarjeta | Título «¿Dónde enviamos tu tarjeta?». Nombre del destinatario tomado del perfil, calle y número, apartamento/unidad opcional, ciudad, estado/provincia/región, código postal cuando corresponda y país. Acciones: «Volver» y «Completar registro». |
+| Registro completado | Mensaje «Tu cuenta Prime está lista». Acción «Entrar a mi dashboard» hacia Inicio · Pin AI; «Mi tarjeta» muestra el estado real de preparación o envío cuando exista. |
+
+El correo asociado a la compra se muestra como dato verificado, sin editarlo libremente en este formulario. Una corrección utiliza el recorrido de verificación de titularidad descrito en recuperación. La contraseña admite gestores de contraseñas, pegado y autocompletado de contraseña nueva; sus requisitos se muestran antes de enviar y se alinearán con la política de autenticación que se audite al implementar.
+
+En el segundo paso aparece «Tu primera tarjeta y el envío están incluidos». La dirección sigue siendo obligatoria para terminar el registro inicial; dividirlo en pasos no convierte ese dato en opcional. Los campos se apilan en móvil, conservan etiquetas visibles y muestran los errores junto al campo correspondiente. Volver al paso anterior conserva los datos no sensibles introducidos. La contraseña no se guarda en almacenamiento del navegador.
+
+El resumen de la activación muestra únicamente el plan realmente comprado: USD 9.99 al mes o USD 89.99 al año. La activación no selecciona de nuevo el plan ni genera otro cobro. Para una cuenta Prime existente se ofrece iniciar sesión o recuperar acceso, preservando su identidad y viajes; no se crea otra cuenta ni se sobrescribe su contraseña por abrir un enlace.
+
+Si el enlace venció, la pantalla ofrece «Solicitar nuevo enlace». Si ya fue utilizado, ofrece «Iniciar sesión» y recuperación de acceso. Un fallo al guardar permite reintentar sin crear otra cuenta ni registrar dos solicitudes de tarjeta. Abrir el enlace no lo consume por sí solo; su uso definitivo debe corresponder a la activación validada.
+
+La cobertura de envío continúa pendiente de evaluación. Antes de habilitar la venta deberá estar definida y comunicada la cobertura aplicable, para que el cliente conozca las condiciones de entrega antes de pagar; esta propuesta no añade países, fechas de entrega ni tarifas de envío. Tampoco muestra «Tarjeta enviada» o «Acceso activo» por el solo hecho de completar el formulario.
 
 ## Auditoría del registro del cleaner y adaptación propuesta
 
