@@ -13,6 +13,17 @@ type ReceiptEvidence = {
   deliveredAt: Date | null;
 };
 
+export function readCommunicationRecoveryCorrelation(value: Prisma.JsonValue | null) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (typeof value.messageLogId !== "string" || typeof value.communicationType !== "string" ||
+      typeof value.channel !== "string") return null;
+  const messageLogId = value.messageLogId.trim();
+  const communicationType = value.communicationType.trim();
+  const channel = value.channel.trim().toLowerCase();
+  if (!messageLogId || !communicationType || !["sms", "email"].includes(channel)) return null;
+  return { messageLogId, communicationType, channel };
+}
+
 export function hasConfirmedCommunicationReceipt(message: ReceiptEvidence, startedAt: Date, now: Date): boolean {
   const provider = message.channel === "sms" ? "twilio" : message.channel === "email" ? "resend" : null;
   const dates = [startedAt, now, message.deliveredAt, message.providerStatusUpdatedAt];
@@ -65,13 +76,11 @@ export async function reconcileGuestJourneyCommunicationEvidence(
       await syncGuestJourneyCommunicationMissionControl(tx, intent.id, scope);
       return { action: "WAITING", reason, providerCalls: 0 } as const;
     };
-    const payload = intent.payload && typeof intent.payload === "object" && !Array.isArray(intent.payload)
-      ? intent.payload : {};
-    if (typeof payload.messageLogId !== "string" || typeof payload.communicationType !== "string" ||
-        !["sms", "email"].includes(String(payload.channel))) return waiting("CORRELATION_MISSING");
+    const payload = readCommunicationRecoveryCorrelation(intent.payload);
+    if (!payload) return waiting("CORRELATION_MISSING");
     const message = await tx.messageLog.findFirst({ where: {
       id: payload.messageLogId, ...scope, reservationId: intent.reservationId,
-      communicationType: payload.communicationType, channel: String(payload.channel),
+      communicationType: payload.communicationType, channel: payload.channel,
     } });
     const attempt = await tx.guestJourneyCoordinationIntentAttempt.findUnique({ where: {
       intentId_attemptNumber: { intentId: intent.id, attemptNumber: intent.claimCount },
