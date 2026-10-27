@@ -10,11 +10,18 @@
 - Railway startup verified PostgreSQL `default_transaction_read_only=on` before listening.
 - Live read-only search against Demo, November 6–9, two adults: one available result, zero failures. The canonical pricing service returned USD 6.69 total (the existing Demo test tariff); this is not a commercial offer. No data was written.
 
+## Live activation, October 27
+
+- The founder explicitly authorized the HTTPS domain and separately authorized transfer/storage of the dedicated `PRIME_OPENAI_API_KEY` in `prime-dashboard-pilot`.
+- HTTPS is active at https://prime-dashboard-pilot-production.up.railway.app/. One-use provisioning completed with HTTP 200; its endpoint subsequently returns 404. The key is held only in the pilot's private configuration volume and the ignored local file, never in browser bundles or Git.
+- Live HTTPS integration: invitation exchanged for a Secure, HttpOnly, SameSite session; unauthenticated member request rejected with 401; cross-origin search rejected with 403.
+- Authenticated natural-language search reached OpenAI, then the canonical Demo availability/pricing services and returned one result (USD 6.69 test tariff). A total budget of USD 5 correctly produced NO_MATCHES.
+- The browser visibly rendered the private invitation screen. A personal PDF invitation with a button to the founder's authenticated entry link was delivered privately; that link is intentionally absent from this repository.
+- The optional reset of the bootstrap environment digest was rejected by approval review and not applied. The persisted configuration already disables provisioning, verified with HTTP 404; existing protection was preserved.
+
 ## Pending
 
-- Creation of the public HTTPS domain was denied by automatic approval review because explicit permission to expose this new service to the Internet was required. No alternate public endpoint was created.
-- The new OpenAI key is saved locally in the ignored `.env.prime.local` and is not yet provisioned to the pilot. The authenticated HTTPS provisioning step awaits that domain.
-- End-to-end browser verification, mobile visual review, and the founder's test await the HTTPS endpoint. Local browser rendering was unavailable in this environment; no screenshots or device certification are claimed.
+- Authenticated browser visual review, mobile visual review, and the founder's first manual test. The automated React interaction test is not real-device certification.
 - Prime permanent accounts, host opt-in, commercial benefits/prices, booking checkout, member trip linkage, and automatic NFC reservation grants are not part of this pilot.
 
 Production `OPENAI_API_KEY`, public booking settings, production API routes, workers, existing reservations, payments, and access grants were not changed.
