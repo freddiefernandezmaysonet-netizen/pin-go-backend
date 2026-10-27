@@ -24,6 +24,7 @@ Estado: diseño comercial en definición con el fundador. Piloto privado de bús
 | Base del descuento | Únicamente el precio del alojamiento por noche. El porcentaje no se aplica a limpieza ni a otros cargos. El tratamiento de impuestos pertenece al cálculo de la cotización. |
 | Uso desde la primera reserva | Confirmado: una membresía adquirida durante el checkout permite aplicar el descuento Prime en esa misma reserva, con el pago de la membresía confirmado. |
 | Primera tarjeta y envío | Incluidos en la membresía, sin cargo adicional para el miembro. |
+| Cobertura de envío | Pendiente de evaluar los costos de envío, según indicó el fundador. Aún no se han seleccionado destinos. |
 | Reemplazo por extravío | USD 5 por reemplazar una tarjeta extraviada. |
 | Cancelación de membresía | Sin permanencia mínima; conserva beneficios hasta terminar el período ya pagado. |
 | Reservaciones ya confirmadas | Conservan el precio acordado y el acceso correspondiente a la estancia aunque se cancele la renovación de Prime. |
@@ -96,6 +97,8 @@ Al implementar, las condiciones aceptadas de una reservación deberán conservar
 
 La tarjeta física personal reutilizable sigue formando parte de Prime y ya existe evidencia de una prueba temporal en Demo. La dirección inicial prepara su envío. El fundador confirmó que **la primera tarjeta y su envío están incluidos en la membresía, sin cargo adicional**. Si el miembro extravía la tarjeta, se cobra **USD 5 por el reemplazo**. Quedan por definir los destinos atendidos y la logística de entrega y reposición. El cargo acordado corresponde a extravío; los casos de defecto, daño o pérdida durante el transporte no están definidos por esta decisión.
 
+El fundador indicó que necesita evaluar los costos de envío antes de decidir la cobertura. Puerto Rico, Estados Unidos y otros países son opciones por evaluar, no destinos ya aprobados. Para esa evaluación se propone comparar el costo por destino del franqueo o transporte, el empaque y el seguimiento, junto con el costo de la tarjeta. Las cotizaciones requieren origen del despacho, peso y dimensiones del envío y destinos de referencia. La evaluación queda pendiente; el diseño del dashboard y los recorridos de cuenta pueden continuar mientras se resuelve.
+
 El diseño debe distinguir el acceso a la cuenta Prime, el estado del envío y el permiso físico de una estancia. Pagar la membresía permite iniciar el alta acordada; la habilitación de una cerradura requiere además el vínculo verificado entre miembro, tarjeta y reservación. Está confirmado que cancelar la renovación o vencer la membresía no elimina el precio ni el acceso correspondientes a reservaciones ya confirmadas. El permiso físico continúa sujeto a la validez de esa reservación y a su horario autorizado.
 
 ### Recorrido operativo propuesto de la tarjeta
@@ -138,7 +141,7 @@ La prueba NFC en Demo acredita el recorrido temporal ya probado; el ciclo de tar
 
 ## Decisiones pendientes, en orden de diseño
 
-1. **Entrega de la tarjeta:** definir destinos cubiertos y logística de entrega. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
+1. **Entrega de la tarjeta:** evaluar los costos de envío antes de decidir los destinos cubiertos y la logística, según indicó el fundador. Obtener origen del despacho, peso y dimensiones del envío y destinos de referencia para cotizar. La primera tarjeta y su envío ya están incluidos; el reemplazo por extravío tiene un cargo confirmado de USD 5.
 2. **Cambios de plan:** ambos planes están confirmados: USD 9.99 al mes y USD 89.99 al año. Queda por definir cómo cambiar entre modalidades, cuándo se hace efectivo el cambio y si se aplica algún prorrateo.
 3. **Suscripción:** completar el recorrido de renovación, los reintentos ante un pago fallido, cualquier período de gracia y la recuperación de la cuenta. La cancelación sin permanencia, el uso hasta finalizar el período pagado y la conservación de reservaciones confirmadas ya están acordados.
 4. **Comisiones:** base de liquidación respecto a impuestos/comisiones de procesamiento, calendario de pago, reembolsos, disputas y reactivaciones. El porcentaje recurrente de 40% ya está confirmado.
