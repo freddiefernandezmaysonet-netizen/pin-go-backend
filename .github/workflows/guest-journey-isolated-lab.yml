@@ -52,10 +52,12 @@ jobs:
           --moduleResolution bundler --target esnext --types node
           src/guest-journey-lab/main.ts src/guest-journey-lab/isolation.test.ts
           src/guest-journey-lab/runtime.db.test.ts
+          src/guest-journey-lab/precheckin-shadow.policy.test.ts
           src/services/guest-journey-communications-recovery.service.test.ts
       - name: Verify isolation and E7 regressions
         run: |
           node --import tsx --test src/guest-journey-lab/isolation.test.ts
+          node --import tsx --test src/guest-journey-lab/precheckin-shadow.policy.test.ts src/services/preCheckinSms.late-consent.test.js
           node --import tsx --test src/services/guest-journey-communications-recovery.service.test.ts
           npm run test:guest-journey-enterprise-e7-communications
       - name: Apply migrations only to disposable PostgreSQL

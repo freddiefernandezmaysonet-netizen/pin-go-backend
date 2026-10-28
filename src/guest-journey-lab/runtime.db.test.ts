@@ -92,3 +92,50 @@ test("real E4/E7 persists claims, simulated receipts and uncertain results witho
   } }), 0, "no other Owner may claim an intent");
   assert.equal(replay.productionReady, false);
 });
+
+test("reservation snapshots produce durable pre-check-in shadow obligations without executable effects", async () => {
+  const shadow = await import("./precheckin-shadow");
+  await lab.prepareLabTables();
+  await shadow.seedPrecheckinShadow(lab.prisma, lab.fixtureRevision);
+  const scope = shadow.shadowScope(lab.fixtureRevision);
+  assert.equal(await lab.prisma.reservation.count({ where: { propertyId: scope.propertyId } }), 14);
+  const messageCount = () => lab.prisma.messageLog.count({ where: scope });
+  assert.equal(await messageCount(), 1, "only the deliberately uncertain prior SMS is seeded");
+  const race = await Promise.allSettled([
+    shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision),
+    shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision),
+  ]);
+  assert.ok(race.some(result => result.status === "fulfilled"));
+  for (const result of race) if (result.status === "rejected") assert.equal(result.reason.code, "P2034");
+  await shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision);
+  const first = await shadow.readPrecheckinShadow(lab.prisma, lab.fixtureRevision);
+  assert.equal(first.observations.length, 25);
+  assert.equal(new Set(first.observations.map(row => row.evidence.effectKey)).size, 25);
+  const rows = (scenario: string) => first.observations.filter(row => row.scenario === scenario).map(row => row.evidence);
+  const required = (scenario: string) => rows(scenario).filter(row => row.state === "REQUIRED").map(row => row.channel).sort();
+  assert.deepEqual(required("direct_due"), ["email", "sms"]);
+  assert.deepEqual(required("no_consent"), ["email"]);
+  assert.deepEqual(required("after_arrival"), ["sms"]);
+  assert.deepEqual(required("late_booking"), ["email", "sms"]);
+  assert.deepEqual(required("legacy_email"), ["sms"]);
+  assert.deepEqual(required("unknown_sms"), ["email"]);
+  for (const scenario of ["before_window", "unpaid", "cancelled", "checkout", "missing_contacts"])
+    assert.deepEqual(required(scenario), []);
+  for (const scenario of ["airbnb", "booking_com", "ota_no_contacts"]) {
+    assert.deepEqual(required(scenario), ["channex"]);
+    assert.equal(rows(scenario)[0].owner, "CHANNEX_OPERATIONAL");
+  }
+  assert.ok(rows("ota_no_contacts")[0].gaps.includes("LEGACY_WORKER_HAS_NO_ELIGIBLE_TRIGGER"));
+  assert.equal(first.executableIntents, 0);
+  assert.equal(first.dispatchableMessages, 0);
+  assert.equal(first.providerCalls, 0);
+  assert.equal(first.deliveryCertified, false);
+  assert.ok(first.observations.every(row => !row.evidence.dispatchAllowed && row.evidence.receipt === "NOT_CERTIFIED"));
+  await lab.prisma.$disconnect();
+  await lab.prisma.$connect();
+  await shadow.seedPrecheckinShadow(lab.prisma, lab.fixtureRevision);
+  assert.equal((await shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision)).recorded, 0);
+  assert.deepEqual(await shadow.readPrecheckinShadow(lab.prisma, lab.fixtureRevision), first);
+  assert.equal(await messageCount(), 1);
+  assert.equal((await shadow.readPrecheckinShadow(lab.prisma, "unrelated_revision")).observations.length, 0);
+});

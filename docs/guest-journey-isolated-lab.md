@@ -10,7 +10,7 @@ complete reservation-event coverage, physical delivery, uncorrelated-outcome rec
 - Environment: `guest-journey-test` / `437014cf-52bf-4c3c-a92a-e1738d01d712`.
 - Database: independent `Postgres`, database and user `guest_journey_lab`; private networking only.
 - API: role `api`, read-only health and evidence endpoints. No product mutation routes.
-- Communications worker: role `communications`, invokes only the scoped E7 cycle with injected simulators.
+- Communications worker: role `communications`, invokes the scoped E7 cycle with injected simulators, receipt recovery and the non-executing pre-check-in shadow planner.
 - Evidence monitor: role `monitor`, observes waiting outcomes; it does not pretend to recover them.
 - Every source is pinned to the reviewed laboratory commit. No merge or production deployment is required.
 
@@ -74,6 +74,52 @@ Fixture identifiers include the deployed commit prefix, exposed as `fixtureRevis
 A new commit gets independent synthetic fixtures; older attempts remain in the database.
 Restarts of the same pinned commit reuse the same records and must not increase provider calls.
 The read-only page is an evidence monitor, not a replacement for the product's Mission Control.
+
+## Reservation-to-obligation shadow: pre-check-in
+
+`precheckinShadow` in `/evidence` now records a separate, non-executing parity probe.
+Fourteen synthetic reservations live in a separate property under the lab organization.
+Twelve start without message or dispatch records; two deliberately carry an email SENT marker
+or an uncertain prior SMS. None has a journey, an executable intent or an APMS_PENDING outbox.
+The planner reads the persisted reservation and prior communication evidence. It stores immutable
+observations in `guest_journey_lab.precheckin_shadow`, unique by effect identity plus fingerprint.
+Repeated unchanged observations, concurrent runs, reconnection and same-commit restart must leave
+25 observations, zero executable intents, zero dispatchable messages and zero provider calls.
+
+The clock is explicitly fixed at `2030-05-01T16:00:00Z`. This makes fixture outcomes reproducible;
+it does not certify production scheduling or real-time event ingestion. No record is marked delivered
+or complete. Every row exposes `receipt=NOT_CERTIFIED`, `claim=NOT_CREATED` and
+`finalEvidence=OBLIGATION_ONLY`. Existing SENT records prevent blind re-creation but do not prove delivery.
+
+| Reservation/event | Shadow obligation | Canonical owner | Current gap / boundary |
+| --- | --- | --- | --- |
+| Paid Direct Booking, four-hour window | Separate email and eligible SMS | Communications | Initial outbox + REQUEST_COMMUNICATION still need implementation |
+| Consent absent, then eligible | Email remains separate from SMS | Communications | Consent must never reset effect identity or consume another channel |
+| During stay | Pending SMS; no new pre-arrival email for an older booking | Communications | E7 currently retires PRECHECKIN at check-in; legacy permits SMS catch-up |
+| Booking created after check-in | Email and eligible SMS | Communications | Same E7 time-window mismatch |
+| Before window / unpaid / cancelled / checkout | Explicit ineligible or not-due reasons | Communications | No executable effects |
+| Missing contacts | Explicit missing-recipient reasons | Communications | No invented recipient or delivery |
+| Prior email SENT / uncertain SMS | Reconcile the existing effect; only the other channel remains required | Communications | No initial resend; no inferred delivery |
+| Airbnb / Booking.com under blocked-external policy | One Channex obligation | Existing Channex operational dispatcher | Handoff and receipt certification remain open; no SMS/email fallback |
+| OTA without usable contact trigger | One expected Channex obligation, visible trigger gap | Existing Channex operational dispatcher | Legacy worker contact selection cannot trigger this route |
+
+Source contracts: `src/workers/reservation.worker.ts` (`processPreCheckinMessages`),
+`src/services/preCheckinSms.service.ts`, `guest-journey-access-communications-bridge.policy.ts`,
+`ota-guest-external-messaging.policy.ts`, `src/channex-messaging/ota-operational-guest.service.ts`,
+and `guest-journey-communications-delivery-adapter.service.ts`. The established 11 legacy
+pre-check-in tests run alongside 10 shadow policy tests and the real PostgreSQL certification.
+This increment changes no production entry point or legacy sender.
+
+Next gate: implement and certify the first-send outbox for Direct Booking using the validated
+eligibility/content contracts, then close the E7 arrival-window mismatch, delivery completion and
+shared legacy/GJ ownership fence before any external canary. Reservation changes, confirmation,
+payment, identity/contract, access, Pin&Go Guest, cleaner/reminders, cancellation and checkout still
+require their own event-to-obligation certification. This probe does not establish full parity.
+
+Rollback of this laboratory increment: pin API and both workers back to the previous validated
+lab commit (`c5a9268150a4d26c83d24d49923b03e403f07380`). Retain the additive shadow table and
+fixture history; no data deletion or production configuration change is needed. A failed shadow
+cycle is logged as `GJ_LAB_CYCLE_FAILED`; inspect the lab heartbeat and CI evidence before retrying.
 
 ## Receipt recovery boundary
 

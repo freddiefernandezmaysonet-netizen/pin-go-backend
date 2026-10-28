@@ -83,6 +83,7 @@ if (role === "api") {
       if (role === "communications") {
         console.log("GJ_LAB_COMMUNICATIONS_CYCLE", JSON.stringify(await runtime.runCommunicationsProbe()));
         console.log("GJ_LAB_COMMUNICATIONS_RECOVERY", JSON.stringify(await runtime.runRecoveryProbe()));
+        console.log("GJ_LAB_PRECHECKIN_SHADOW", JSON.stringify(await runtime.runPrecheckinShadowProbe()));
       } else {
         const evidence = await runtime.readLabEvidence();
         await runtime.heartbeat("monitor", {

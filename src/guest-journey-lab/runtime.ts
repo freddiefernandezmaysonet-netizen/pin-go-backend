@@ -4,6 +4,7 @@ import { runGuestJourneyCommunicationsOwnerCycle } from "../services/guest-journ
 import { executeGuestJourneyCommunicationDeliveryAdapter } from "../services/guest-journey-communications-delivery-adapter.service";
 import { recordMessageDeliveryOutcome } from "../services/guest-journey-communications-delivery-outcome.service";
 import { reconcileGuestJourneyCommunicationEvidence } from "../services/guest-journey-communications-recovery.service";
+import { preparePrecheckinShadow, seedPrecheckinShadow, runPrecheckinShadow, readPrecheckinShadow } from "./precheckin-shadow";
 
 export const prisma = new PrismaClient();
 export const fixtureRevision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12);
@@ -24,6 +25,7 @@ export async function prepareLabTables(): Promise<void> {
     role TEXT PRIMARY KEY, commit_sha TEXT NOT NULL, observed_at TIMESTAMPTZ NOT NULL,
     details JSONB NOT NULL
   )`);
+  await preparePrecheckinShadow(prisma);
 }
 
 /** Seed once. Restarting must preserve claims, receipts and call counts. */
@@ -68,7 +70,10 @@ export async function seedLabFixtures(): Promise<void> {
     } });
     if (!existing) await materializeGuestJourneyCoordinationIntents(prisma, reservationId, { scope });
   }
+  await seedPrecheckinShadow(prisma, fixtureRevision);
 }
+
+export const runPrecheckinShadowProbe = () => runPrecheckinShadow(prisma, fixtureRevision);
 
 export async function heartbeat(role: string, details: Prisma.InputJsonValue): Promise<void> {
   const commit = process.env.RAILWAY_GIT_COMMIT_SHA ?? "local";
@@ -144,7 +149,7 @@ export async function runRecoveryProbe() {
 }
 
 export async function readLabEvidence() {
-  const [messages, intents, calls, workers, issues, attempts, recoveryAudit] = await Promise.all([
+  const [messages, intents, calls, workers, issues, attempts, recoveryAudit, precheckinShadow] = await Promise.all([
     prisma.messageLog.findMany({ where: { organizationId, propertyId }, orderBy: { id: "asc" }, select: {
       id: true, status: true, providerMessageId: true, providerDeliveryStatus: true,
       deliveredAt: true, retryCount: true, error: true,
@@ -166,11 +171,13 @@ export async function readLabEvidence() {
     prisma.guestJourneyCoordinationIntentAttempt.count({ where: { intent: { reservation: { propertyId } } } }),
     prisma.apmsAuditEntry.findMany({ where: { organizationId, propertyId, reason: "COMMUNICATION_DELIVERY_RECEIPT_CONFIRMED" },
       select: { decisionId: true, entityId: true, status: true, completedAt: true, metadata: true } }),
+    readPrecheckinShadow(prisma, fixtureRevision),
   ]);
   return {
     mode: "SIMULATION_ONLY", fixtureRevision, productionReady: false, externalProviderCallsAllowed: false,
     coverage: "E4/E7 outbox, claims, simulated send, callback persistence and replay; not full reservation certification",
     knownGaps: ["unknown results without provider correlation", "callbacks arriving before provider ID persistence", "all-event first-send parity", "delivery-gated completion for initial sends", "full host Mission Control UI certification"],
     messages, intents, calls, workers, operationalIssues: issues.length, issues, recoveryAudit, durableAttempts: attempts,
+    precheckinShadow,
   };
 }
