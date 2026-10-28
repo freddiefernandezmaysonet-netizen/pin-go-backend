@@ -106,7 +106,14 @@ test("reservation snapshots produce durable pre-check-in shadow obligations with
     shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision),
   ]);
   assert.ok(race.some(result => result.status === "fulfilled"));
-  for (const result of race) if (result.status === "rejected") assert.equal(result.reason.code, "P2034");
+  for (const result of race) if (result.status === "rejected") {
+    // Prisma maps ORM conflicts to P2034 but raw SQL serialization failures to
+    // P2010 + PostgreSQL 40001. No other raw-query failure is an allowed retry.
+    if (result.reason.code !== "P2034") {
+      assert.equal(result.reason.code, "P2010");
+      assert.equal(result.reason.meta?.code, "40001");
+    }
+  }
   await shadow.runPrecheckinShadow(lab.prisma, lab.fixtureRevision);
   const first = await shadow.readPrecheckinShadow(lab.prisma, lab.fixtureRevision);
   assert.equal(first.observations.length, 25);
