@@ -1,0 +1,41 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import express from "express";
+import type { AddressInfo } from "node:net";
+import type { PrismaClient } from "@prisma/client";
+import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
+import { buildGuestAppRouter } from "./guest-app.routes.js";
+
+test("copied OTA activation URL cannot reveal a native bearer or send a verification message on GET", async t => {
+  const token = "synthetic_ota_stay_token_123456";
+  const queries: any[] = [];
+  const db = { reservation: { findFirst: async (query: any) => {
+    queries.push(query);
+    return query.where.guestToken === token ? { preferredLanguage: "es", source: "AIRBNB", externalProvider: "CHANNEX", externalId: "booking-1" } : null;
+  } } } as unknown as PrismaClient;
+  const app = express(); app.use(buildGuestAppRouter(db));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  t.after(() => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const now = new Date();
+  const activation = guestAppActivationUrl({ guestToken: token, guestTokenExpiresAt: new Date(now.getTime() + 86400000) }, now, {})!;
+  const response = await fetch(base + new URL(activation).pathname);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  const html = await response.text();
+  assert.doesNotMatch(html, /pingo-guest:/);
+  assert.ok(html.includes(`/guest/verify/${token}`));
+  assert.match(html, /Enviar código de verificación/);
+  assert.match(response.headers.get("set-cookie")!, /__Host-pingo-guest-activation=.*Secure;.*SameSite=Strict/i);
+  assert.doesNotMatch(html, /Guarda el correo/);
+  assert.equal(queries[0].where.status, "ACTIVE");
+  assert.equal(queries[0].where.property.status, "ACTIVE");
+  assert.ok(queries[0].where.guestTokenExpiresAt.gt instanceof Date);
+  assert.ok(queries[0].where.checkOut.gt instanceof Date);
+  assert.deepEqual(queries[0].where.OR, [{ guestStayLink: null }, { guestStayLink: { revokedAt: null } }]);
+  const invalid = await fetch(base + "/guest/app/synthetic_wrong_stay_token_123456");
+  assert.equal(invalid.status, 404);
+  assert.doesNotMatch(await invalid.text(), /pingo-guest:/);
+});

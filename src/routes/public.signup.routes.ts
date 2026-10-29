@@ -337,10 +337,10 @@ const session = await stripe.checkout.sessions.create({
     });
   } catch (error: any) {
     if (error?.message === 'INVALID_HAAS_SELECTION') return res.status(400).json({ok:false,error:error.message});
-    console.error("signup-checkout error:", error?.message);
+    console.error("signup-checkout error:", { code: "SIGNUP_CHECKOUT_FAILED" });
     return res.status(500).json({
       ok: false,
-      error: error?.message ?? "Internal server error",
+      error: "Unable to start signup checkout",
     });
   }
 });

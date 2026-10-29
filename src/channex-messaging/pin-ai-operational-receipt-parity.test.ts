@@ -54,7 +54,7 @@ test("trusted Channex operational receipts are owned by Pin&Go, not the host", a
     assert.deepEqual([...own], [operationId]);
     assert.equal(f.queries[0].to, threadId);
     assert.deepEqual(f.queries[0].communicationType.in, [
-      "PRECHECKIN", "GUEST_ACCESS_PASSCODE", "CHECKOUT",
+      "PRECHECKIN", "GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION", "GUEST_APP_DEVICE_VERIFICATION", "CHECKOUT",
     ]);
   }
 });
@@ -143,4 +143,11 @@ test("a genuine host reply still pauses Pin AI following a Pin&Go access message
   });
   await process(job);
   assert.deepEqual(outcomes, ["NEEDS_HOST:HOST_TAKEOVER"]);
+});
+
+
+test("app activation is Pin&Go-owned and does not count as a host takeover", async () => {
+  const f = fixture([receipt({ communicationType: "GUEST_APP_ACTIVATION" })]);
+  const own = await f.repo.ownMessageIds({ organizationId, propertyId, threadId }, [operationId]);
+  assert.equal(own.has(operationId), true);
 });

@@ -70,18 +70,23 @@ export async function processOtaOperationalCommunications(
 
     for (let index = 0; index < eligible.length; index += CONCURRENCY) {
       await Promise.all(eligible.slice(index, index + CONCURRENCY).map(async r => {
-        const types: Array<"PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "CHECKOUT"> = [];
+        const types: Array<"PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT"> = [];
         if (r.checkIn > now && r.checkIn <= fourHours) types.push("PRECHECKIN");
         if (r.guestAccessReleaseStatus === "RELEASED" && r.checkOut > now &&
-            r.checkIn <= fourHours) types.push("GUEST_ACCESS_PASSCODE");
+            r.checkIn <= fourHours) types.push("GUEST_ACCESS_PASSCODE", "GUEST_APP_ACTIVATION");
         if (r.checkOut >= pastHour && r.checkOut <= now) types.push("CHECKOUT");
 
+        let accessAccepted = false;
         for (const type of types) {
+          if (type === "GUEST_APP_ACTIVATION" && !accessAccepted) continue;
           try {
             const result = await deliver(
               prisma, r.id, type, { env, now },
             );
-            if (result?.ok) accepted++;
+            if (result?.ok) {
+              accepted++;
+              if (type === "GUEST_ACCESS_PASSCODE") accessAccepted = true;
+            }
             else if (result) {
               blocked++;
               // No credentials, phone, guest message or provider error bodies.

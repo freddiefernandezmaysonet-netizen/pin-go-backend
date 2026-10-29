@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/routes/guest-app.routes.ts", "src/routes/guest-app.db.test.ts"]
+  "include": ["src/routes/guest-app.routes.ts", "src/routes/guest-app.db.test.ts", "src/routes/guest-app-activation-security.db.test.ts"]
 }

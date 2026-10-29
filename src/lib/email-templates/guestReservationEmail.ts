@@ -6,6 +6,7 @@ export type GuestReservationEmailMode =
 
 export interface GuestReservationEmailInput {
   mode: GuestReservationEmailMode;
+  pinAIEnabled?: boolean;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -426,6 +427,43 @@ export function buildGuestReservationEmail(
           ${verificationBlock}
 
           ${manageReservationBlock}
+
+          ${input.mode === "DIRECT_BOOKING" && manageReservationBlock ? `
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:20px 0;color:#1e3a8a;">
+            <h3 style="margin:0 0 8px;">${isSpanish ? "Tu estadía, paso a paso" : "Your stay, step by step"}</h3>
+            <ol style="margin:0;padding-left:22px;">
+              <li>${isSpanish
+                ? "Guarda este correo y abre Administrar reservación para consultar los detalles y completar los requisitos de pre-check-in que correspondan a tu alojamiento."
+                : "Keep this email and open Manage reservation to review your details and complete the pre-check-in requirements for your accommodation."}</li>
+              <li>${isSpanish
+                ? "Antes de llegar, revisa las instrucciones de acceso y los horarios de tu reserva. El acceso se habilita según los requisitos y la ventana de entrada; la confirmación por sí sola no permite entrar antes."
+                : "Before arrival, review your access instructions and reservation times. Access is enabled according to the requirements and entry window; confirmation alone does not permit early entry."}</li>
+              <li>${isSpanish
+                ? "Durante tu estadía, usa Administrar reservación para consultar las opciones disponibles. Los cambios, cancelaciones y solicitudes de horarios dependen de disponibilidad, condiciones y posibles cargos. Espera su confirmación antes de dar un cambio por hecho."
+                : "During your stay, use Manage reservation to review available options. Changes, cancellations, and time requests depend on availability, conditions, and possible charges. Wait for confirmation before treating a change as final."}</li>
+              <li>${isSpanish
+                ? "Antes de salir, revisa la hora de checkout y las instrucciones de tu alojamiento."
+                : "Before leaving, review your checkout time and your accommodation’s departure instructions."}</li>
+            </ol>
+          </div>
+          ${input.pinAIEnabled === true ? `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:20px 0;">
+            <h3 style="margin:0 0 8px;">${isSpanish ? "Conoce Pin AI, el asistente de tu estadía" : "Meet Pin AI, your stay assistant"}</h3>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Tu alojamiento tiene Pin AI activo. Abre Administrar reservación y busca el chat de Pin AI. Puedes usar este asistente de inteligencia artificial desde el navegador, sin instalar una app, y escribir en español o inglés."
+              : "Your accommodation has Pin AI enabled. Open Manage reservation and find the Pin AI chat. You can use this AI assistant in your browser without installing an app, and write in English or Spanish."}</p>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Puedes preguntar cómo acceder al alojamiento, cómo conectarte al Wi-Fi o qué hacer si la televisión no funciona. También puedes consultar si es posible solicitar una salida más tarde. Las respuestas dependen de la información proporcionada por el anfitrión."
+              : "You can ask how to access the accommodation, how to connect to Wi-Fi, or what to do if the TV is not working. You can also ask whether a later checkout can be requested. Answers depend on information supplied by the host."}</p>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Si reportas un problema, revisa la respuesta y las actualizaciones para saber si se ha avisado al anfitrión. Pin AI está disponible desde 24 horas antes de la entrada hasta 24 horas después de la salida. Si no aparece o necesitas ayuda fuera de ese período, utiliza el contacto de esta confirmación."
+              : "If you report a problem, check the reply and updates to see whether the host has been notified. Pin AI is available from 24 hours before check-in until 24 hours after checkout. If it does not appear or you need help outside that period, use the contact in this confirmation."}</p>
+            <p style="margin:0;font-size:13px;color:#475569;">${isSpanish
+              ? "Tu enlace de reservación es privado. Evita compartirlo."
+              : "Your reservation link is private. Avoid sharing it."}</p>
+          </div>
+          ` : ""}
+          ` : ""}
 
           ${cancellationPolicyBlock}
 

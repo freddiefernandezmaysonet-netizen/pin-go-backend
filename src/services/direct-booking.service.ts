@@ -1090,6 +1090,7 @@ if (updatedReservation.guestEmail) {
     );
 
   const directBookingGuestEmailInput = {
+    pinAIPropertyScope: { organizationId: property.organizationId, propertyId: property.id },
     to: updatedReservation.guestEmail,
     replyTo: guestReplyTo.email,
     reservationNumber: notificationReservation.reservationNumber,

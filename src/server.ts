@@ -12,6 +12,7 @@ import express from "express";
 import crypto from "crypto";
 import { prisma } from "./lib/prisma";
 import bodyParser from "body-parser";
+import { withGuestAppFormCors } from "./middleware/guest-app-form-cors.js";
 import { registerStripeWebhook } from "./webhooks/stripe.webhook";
 import { mountSalesVoiceLiveSipWebhook } from "./services/sales-voice-live-sip-mount.service.js";
 import cors from "cors";
@@ -194,7 +195,7 @@ mountSalesVoiceLiveSipWebhook(app, prisma, process.env);
 // Middleware
 // =====================
 app.use(
-  cors({
+  withGuestAppFormCors(cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
@@ -212,7 +213,7 @@ app.use(
         });
     },
     credentials: true,
-  })
+  }))
 );
 
 app.use(

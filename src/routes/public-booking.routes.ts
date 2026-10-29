@@ -1,3 +1,4 @@
+import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
@@ -41,7 +42,8 @@ import {
   type PublishedBrandContext,
 } from "../services/branding/published-brand-context.service.js";
 
-const prisma = new PrismaClient();
+export const publicBookingDb = new PrismaClient();
+const prisma = publicBookingDb;
 const publicBookingRouter = Router();
 publicBookingRouter.use(damagePaymentAuthorizationRouter(prisma));
 
@@ -1098,6 +1100,9 @@ return res.json({
   publicBrand,
   property: {
     ...property,
+    pinAIEnabled: await guestPinAIInformationEnabled(prisma, process.env, {
+      propertyId: property.id, organizationId: property.organizationId,
+    }),
     cancellationPolicy,
     cancellationPolicyPresentation,
     propertyProtection: property.propertyProtectionEnabled
@@ -1575,6 +1580,7 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
         id: true,
         organizationId: true,
         name: true,
+        slug: true,
         publicTitle: true,
         baseNightlyRate: true,
         cleaningFee: true,
@@ -1894,7 +1900,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       success_url:
         `${APP_URL}/booking/success?organization=${encodeURIComponent(
           String(property.organization.slug)
-        )}&identityCheck=${
+        )}&property=${encodeURIComponent(String(property.slug ?? ""))}&identityCheck=${
           identityVerificationRequired
             ? "required"
             : "optional"
@@ -1987,14 +1993,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
      pricing, 
     });
   } catch (error: any) {
-    // Provider error messages can embed API keys or payment metadata.
-    // Record a fixed diagnostic code rather than the raw Stripe error.
-    const failureType =
-      typeof error?.type === "string" && error.type.startsWith("Stripe")
-        ? "STRIPE_PROVIDER_ERROR"
-        : "CHECKOUT_CREATE_FAILED";
-    console.error("[public-booking create-checkout error]", { failureType });
-
+    console.error("[public-booking create-checkout error]", { code: "CHECKOUT_CREATE_FAILED" });
     return res.status(500).json({
       ok: false,
       error: "Failed to create checkout",

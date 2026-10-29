@@ -4,7 +4,7 @@ import {
   reopenOperationalIssue,
 } from "../apms/operational-intelligence.service.js";
 
-export type OtaOperationalType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "CHECKOUT";
+export type OtaOperationalType = "PRECHECKIN" | "GUEST_ACCESS_PASSCODE" | "GUEST_APP_ACTIVATION" | "CHECKOUT";
 export type OtaOperationalDeliveryEvidence = {
   organizationId: string;
   propertyId: string;
@@ -17,6 +17,7 @@ export type OtaOperationalDeliveryEvidence = {
 };
 
 const ACTIONABLE_ERRORS = new Set([
+  "OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE",
   "OTA_OPERATIONAL_THREAD_MISSING_OR_AMBIGUOUS",
   "OTA_OPERATIONAL_THREAD_NOT_ELIGIBLE",
   "OTA_OPERATIONAL_THREAD_SEARCH_LIMIT",
@@ -60,7 +61,7 @@ export async function reconcileOtaOperationalDeliveryAttention(
   } = { upsert: upsertOperationalIssue, reopen: reopenOperationalIssue },
 ): Promise<"CREATED" | "UPDATED" | "REOPENED" | "RESOLVED" | "UNCHANGED"> {
   const reason = String(input.error ?? "").trim().toUpperCase();
-  if (!input.ok && !ACTIONABLE_ERRORS.has(reason)) return "UNCHANGED";
+  if (!input.ok && !ACTIONABLE_ERRORS.has(reason) && !reason.startsWith("OTA_OPERATIONAL_PREFLIGHT_")) return "UNCHANGED";
   const operationalKey = otaOperationalIssueKey(input);
   const existing = await prisma.operationalIssue.findUnique({
     where: { operationalKey },

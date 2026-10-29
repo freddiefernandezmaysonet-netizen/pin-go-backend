@@ -1,0 +1,62 @@
+name: App Review account and MFA isolation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/app-review-account.yml"
+      - "src/auth/**"
+      - "src/routes/auth.routes.ts"
+      - "src/services/provision-app-review-account*"
+      - "src/scripts/provision-app-review-account.ts"
+      - "tsconfig.app-review.json"
+      - "prisma/**"
+      - "package*.json"
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_app_review_test?schema=public
+  PINGO_APP_REVIEW_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/pingo_app_review_test?schema=public
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_app_review_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --silent --no-audit --no-fund
+      - run: npx prisma validate && npx prisma generate && npx prisma migrate deploy
+      - name: Reviewer database, login and authentication regressions
+        run: >-
+          node --import tsx --test
+          src/auth/app-review-access.test.ts
+          src/auth/app-review-login.test.ts
+          src/auth/app-review-database.test.ts
+          src/services/provision-app-review-account.test.ts
+          src/auth/enterprise-auth-e5.test.ts
+          src/auth/enterprise-auth-e6.test.ts
+          src/auth/enterprise-auth-e7.test.ts
+          src/auth/enterprise-auth-e8a.test.ts
+          src/auth/enterprise-auth-e8b.test.ts
+          src/auth/host-session.policy.test.ts
+          src/auth/host-session-token.test.ts
+      - run: npx tsc -p tsconfig.app-review.json
+      - run: npx tsc -p tsconfig.enterprise-auth-e8b.json
+      - name: Load actual login route
+        run: node --import tsx -e "import('./src/routes/auth.routes.ts')"

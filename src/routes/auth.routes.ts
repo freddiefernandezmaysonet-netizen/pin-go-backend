@@ -1,3 +1,4 @@
+import { createAppReviewSession } from "../auth/app-review-access.js";
 import { selectHostSessionPolicy, hostCredentialLifetimeSeconds, hostCredentialNeedsRenewal, isRollingHostPolicy } from "../auth/host-session.policy.js";
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
@@ -109,7 +110,7 @@ authRouter.post("/auth/login", async (req, res) => {
     const trustedDeviceToken = loginTrustedDeviceToken(req);
     const e6Environment = readE6Environment();
     const e6Runtime = evaluateE7EffectiveMode(user.id, e6Environment);
-    const sessionPolicy = selectHostSessionPolicy(user.role, isMobileAuthClient(req), req.get("x-pin-go-session-renewal") === "1");
+    let sessionPolicy = selectHostSessionPolicy(user.role, isMobileAuthClient(req), req.get("x-pin-go-session-renewal") === "1");
     let boundSessionId: string | null = null;
 
     if (e6Runtime.mode === "ENFORCE" && !e6Runtime.ready) {
@@ -118,6 +119,10 @@ authRouter.post("/auth/login", async (req, res) => {
       });
       return res.status(503).json({ error: "MFA_NOT_CONFIGURED" });
     }
+
+    boundSessionId = await createAppReviewSession(prisma, user, process.env, req.get("user-agent") ?? null);
+    // Review sessions have a fixed deadline and cannot renew as rolling host sessions.
+    if (boundSessionId) sessionPolicy = "LEGACY";
 
     const observeShadow = async () => {
       try {
@@ -141,7 +146,7 @@ authRouter.post("/auth/login", async (req, res) => {
       }
     };
 
-    if (requiresE7MfaChallenge(e6Runtime)) {
+    if (!boundSessionId && requiresE7MfaChallenge(e6Runtime)) {
       try {
         const trustedDevice = await findValidE6TrustedDevice(prisma as any, {
           userId: user.id,
@@ -208,7 +213,7 @@ authRouter.post("/auth/login", async (req, res) => {
         );
         await observeShadow();
       }
-    } else if (e6Runtime.mode === "SHADOW") {
+    } else if (!boundSessionId && e6Runtime.mode === "SHADOW") {
       await observeShadow();
     }
 

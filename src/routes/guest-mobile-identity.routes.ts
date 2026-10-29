@@ -94,6 +94,9 @@ guestMobileIdentityRouter.post(
       });
     } catch (error) {
       const code = error instanceof Error ? error.message : "GUEST_MOBILE_EXCHANGE_FAILED";
+      if (code === "GUEST_MOBILE_ACTIVATION_REQUIRED") {
+        return res.status(403).json({ ok: false, error: "DEVICE_VERIFICATION_REQUIRED" });
+      }
       if (
         code === "GUEST_MOBILE_INVALID_STAY_TOKEN" ||
         code === "GUEST_MOBILE_STAY_NOT_AVAILABLE" ||
@@ -101,7 +104,8 @@ guestMobileIdentityRouter.post(
       ) {
         return res.status(404).json({ ok: false, error: "STAY_NOT_AVAILABLE" });
       }
-      console.error("[GUEST_MOBILE_SESSION_EXCHANGE] failed", { code });
+      // Prisma/provider exception text can contain request arguments or tokens.
+      console.error("[GUEST_MOBILE_SESSION_EXCHANGE] failed", { code: "GUEST_MOBILE_EXCHANGE_FAILED" });
       return res.status(500).json({ ok: false, error: "GUEST_MOBILE_EXCHANGE_FAILED" });
     }
   },

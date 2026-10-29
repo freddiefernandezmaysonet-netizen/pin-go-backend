@@ -151,3 +151,10 @@ test("legacy Airbnb not-due conditions do not alert the host", async () => {
   }
   assert.equal(f.saved.length, 0);
 });
+
+test("categorized preflight failures remain visible to the host and resolve on acceptance", async () => {
+  const f = fixture();
+  const error = "OTA_OPERATIONAL_PREFLIGHT_RESERVATION_RECHECK_INTERNAL";
+  assert.equal(await reconcileOtaOperationalDeliveryAttention(f.db, { ...input, error }, f.deps), "CREATED");
+  assert.equal(await reconcileOtaOperationalDeliveryAttention(f.db, { ...input, ok: true, error: null }, f.deps), "RESOLVED");
+});

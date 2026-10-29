@@ -27,8 +27,10 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
     reservationNumber: "PG-HANDOFF-TEST", guestToken: token, guestTokenExpiresAt: future,
     checkIn: new Date(), checkOut: future, status: "ACTIVE", guestAccessReleaseStatus: "BLOCKED",
   } });
+  let sentCode = "";
   const app = express();
-  app.use(buildGuestAppRouter(db));
+  app.use(express.urlencoded({ extended: false }));
+  app.use(buildGuestAppRouter(db, { deliverVerification: async input => { sentCode = input.code; return true; } }));
   const server = createServer(app);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -36,7 +38,7 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (value = token) => fetch(`${base}/guest/app/${value}`, { redirect: "manual" });
 
-  await t.test("portal offers explicit native handoff and browser fallback, without automatic redirect", async () => {
+  await t.test("portal verifies the reservation email before native handoff and retains the browser fallback", async () => {
     assert.match(renderGuestAppEntry(token, "en"), new RegExp(`/guest/app/${token}`));
     const response = await get();
     assert.equal(response.status, 200);
@@ -45,15 +47,28 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
     assert.match(response.headers.get("content-security-policy")!, /default-src 'none'/);
     assert.equal(response.headers.get("location"), null);
     const html = await response.text();
-    assert.match(html, /Open in Pin&amp;Go Guest/);
+    assert.match(html, /Send verification code/);
+    assert.match(html, /reservation email/);
+    assert.doesNotMatch(html, /pingo-guest:/);
     assert.match(html, new RegExp(`href="/guest/verify/${token}"`));
-    assert.match(html, /do not need to receive SMS/);
+
     assert.doesNotMatch(html, /<script|http-equiv="refresh"|https?:\/\//);
-    const nativeUrl = html.match(/href="(pingo-guest:[^"]+)"/)![1]!;
+    const cookie = response.headers.get("set-cookie")!.split(";")[0]!;
+    const csrf = html.match(/name="csrf" value="([^"]+)"/)![1]!;
+    const post = (action: string, body: Record<string, string>) => fetch(`${base}/guest/app/${token}/${action}`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", cookie }, body: new URLSearchParams(body),
+    });
+    const pending = await post("request", { csrf });
+    assert.equal(pending.status, 200);
+    const challengeId = (await pending.text()).match(/name="challengeId" value="([^"]+)"/)![1]!;
+    const confirmed = await post("verify", { csrf, challengeId, code: sentCode });
+    assert.equal(confirmed.status, 200);
+    const nativeUrl = (await confirmed.text()).match(/href="(pingo-guest:[^"]+)"/)![1]!;
     const parsed = new URL(nativeUrl);
     assert.equal(parsed.protocol, "pingo-guest:");
     assert.equal(parsed.hostname, "stay");
-    assert.equal(parsed.pathname, `/${token}`);
+    assert.ok(parsed.pathname.startsWith("/gact_"));
+    assert.notEqual(parsed.pathname, `/${token}`);
     assert.equal(parsed.search, "");
     assert.equal(parsed.hash, "");
     const exchanged = await exchangeGuestStayToken(db, { guestToken: parsed.pathname.slice(1), platform: "ios" });
@@ -73,7 +88,7 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
   });
   await t.test("Spanish instructions", async () => {
     await db.reservation.update({ where: { id: reservation.id }, data: { preferredLanguage: "es-PR" } });
-    assert.match(await (await get()).text(), /Abrir en Pin&amp;Go Guest/);
+    assert.match(await (await get()).text(), /Enviar código de verificación/);
   });
   const unavailable = async () => {
     const response = await get();
@@ -92,7 +107,7 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
   await t.test("revoked stay link blocks the handoff and native exchange", async () => {
     await db.guestStayLink.update({ where: { reservationId: reservation.id }, data: { revokedAt: new Date() } });
     await unavailable();
-    await assert.rejects(exchangeGuestStayToken(db, { guestToken: token }), /STAY_LINK_REVOKED/);
+    await assert.rejects(exchangeGuestStayToken(db, { guestToken: token }), /ACTIVATION_REQUIRED/);
   });
   await t.test("inactive property blocks the handoff", async () => {
     await db.guestStayLink.update({ where: { reservationId: reservation.id }, data: { revokedAt: null } });

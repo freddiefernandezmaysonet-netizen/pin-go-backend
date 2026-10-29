@@ -208,6 +208,7 @@ export async function applyInternalDemoDirectBookingParity(
 
   if (updated.guestEmail) {
     const payload = {
+      pinAIPropertyScope: { organizationId: reservation.property.organizationId, propertyId: reservation.property.id },
       demoSimulation: true,
       demoPrecheckinRequired: !reservation.guestAgreementSignedAt,
       demoGuestAgreement: {

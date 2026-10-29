@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { resolveOtaConnectionCenterConfig } from "../distribution/ota-connection-center.config.js";
 import { decryptAccessCode } from "../services/access-code-crypto.service.js";
@@ -8,11 +9,11 @@ import {
   resolveChannexOperationalProvider,
 } from "../services/ota-guest-external-messaging.policy.js";
 import {
-  createHostInbox, createInboxHttpRequest, validId,
+  createHostInbox, createInboxHttpRequest, validId, InboxError,
   type InboxRequest, type Thread,
 } from "./host-inbox.js";
 import {
-  buildAirbnbAccessText, type AirbnbCommunicationType,
+  buildAirbnbAccessText, guestAppActivationUrl, type AirbnbCommunicationType,
 } from "./airbnb-access.policy.js";
 import {
   deliverAirbnbCommunication, type AirbnbDeliveryResult,
@@ -20,6 +21,7 @@ import {
 
 const reservationInclude = {
   property: true,
+  guestStayLink: { select: { revokedAt: true } },
   accessGrants: { include: { secureAccessCode: true } },
 } as const;
 
@@ -43,10 +45,15 @@ export async function deliverOtaOperationalCommunication(
     now?: Date;
     request?: InboxRequest;
     decrypt?: typeof decryptAccessCode;
+    activationVerification?: { challengeId: string; code: string };
   } = {},
 ): Promise<AirbnbDeliveryResult | null> {
   const env = options.env ?? process.env;
-  const pilot = await deliverAirbnbCommunication(prisma, reservationId, type, options);
+  const verification = type === "GUEST_APP_DEVICE_VERIFICATION" ? options.activationVerification : undefined;
+  if (type === "GUEST_APP_DEVICE_VERIFICATION" &&
+      (!verification || !/^[A-Za-z0-9_-]{32}$/.test(verification.challengeId) || !/^\d{6}$/.test(verification.code)))
+    return failure("OTA_OPERATIONAL_VERIFICATION_INVALID");
+  const pilot = verification ? null : await deliverAirbnbCommunication(prisma, reservationId, type, options);
   if (pilot) return pilot;
   if (!String(env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS ?? "").trim()) return null;
 
@@ -70,6 +77,9 @@ export async function deliverOtaOperationalCommunication(
     return failure("OTA_OPERATIONAL_CHECKOUT_NOT_DUE");
   if (type === "GUEST_ACCESS_PASSCODE" && now >= r.checkOut)
     return failure("OTA_OPERATIONAL_ACCESS_EXPIRED");
+  if (verification && (now >= r.checkOut || r.property.status !== "ACTIVE" ||
+      !r.guestTokenExpiresAt || r.guestTokenExpiresAt <= now || r.guestStayLink?.revokedAt))
+    return failure("OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
 
   const grants = r.accessGrants.filter(g =>
     g.type === "GUEST" && g.method === "PASSCODE_TIMEBOUND" &&
@@ -90,12 +100,16 @@ export async function deliverOtaOperationalCommunication(
     provider, type, r.checkIn.toISOString(), r.checkOut.toISOString(),
     type === "GUEST_ACCESS_PASSCODE" ? grant?.id : null,
     type === "GUEST_ACCESS_PASSCODE" ? grant?.secureAccessCode?.accessCodeHash : null,
+    ...(verification ? [verification.challengeId] : []),
   ])).digest("hex");
   const prior = await prisma.messageLog.findUnique({ where: { id: receiptId } });
   if (prior) return prior.status === "SENT"
     ? { ok: true, status: "SENT", replayed: true }
     : failure("OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN");
 
+  const guestAppUrl = type === "GUEST_APP_ACTIVATION" ? guestAppActivationUrl(r, now, env) : null;
+  if (type === "GUEST_APP_ACTIVATION" && (!guestAppUrl || r.guestAccessReleaseStatus !== "RELEASED" || now >= r.checkOut))
+    return failure("OTA_OPERATIONAL_GUEST_APP_LINK_UNAVAILABLE");
   const config = resolveOtaConnectionCenterConfig(env);
   if (!config.enabled && !options.request) return failure("OTA_OPERATIONAL_TRANSPORT_DISABLED");
   const request = options.request ?? (config.enabled
@@ -127,6 +141,7 @@ export async function deliverOtaOperationalCommunication(
     unknown: async () => { throw Error("OTA_OPERATIONAL_HOST_SEND_FORBIDDEN"); },
   });
 
+  let stage = "THREAD_LIST";
   try {
     const matching: Thread[] = [];
     for (let page = 1; page <= 50; page++) {
@@ -138,6 +153,7 @@ export async function deliverOtaOperationalCommunication(
     if (matching.length !== 1)
       return failure("OTA_OPERATIONAL_THREAD_MISSING_OR_AMBIGUOUS");
     const thread = matching[0]!;
+    stage = "THREAD_DETAIL";
     const detail = await inbox.messages(scope, thread.id, { page: 1, limit: 1 });
     const expected = provider === "AIRBNB" ? "airbnb" : "bookingcom";
     if (detail.thread.bookingId !== r.externalId ||
@@ -145,18 +161,23 @@ export async function deliverOtaOperationalCommunication(
         detail.thread.isClosed)
       return failure("OTA_OPERATIONAL_THREAD_NOT_ELIGIBLE");
 
+    stage = "RESERVATION_RECHECK";
     const current = await prisma.reservation.findUnique({
       where: { id: reservationId }, include: reservationInclude,
     });
-    if (!current || JSON.stringify(current) !== JSON.stringify(r))
+    if (!current || !isDeepStrictEqual(current, r))
       return failure("OTA_OPERATIONAL_RESERVATION_CHANGED");
 
+    stage = "ACCESS_DECRYPT";
     const code = grant?.secureAccessCode?.accessCodeEnc
       ? (options.decrypt ?? decryptAccessCode)(grant.secureAccessCode.accessCodeEnc)
       : undefined;
+    stage = "MESSAGE_BUILD";
     // Existing OTA-neutral Pin&Go text builder, retained for Airbnb parity.
     const text = buildAirbnbAccessText({
       type, propertyName: r.property.name, language: r.preferredLanguage,
+      ...(guestAppUrl ? { guestAppUrl } : {}),
+      ...(verification ? { verificationCode: verification.code } : {}),
       arrivalLocation: formatPropertyArrivalLocation(r.property, r.preferredLanguage),
       timezone: r.property.timezone, checkIn: r.checkIn, checkOut: r.checkOut,
       address: r.property.address1,
@@ -165,6 +186,7 @@ export async function deliverOtaOperationalCommunication(
     if (!text.trim() || text.length > 5000)
       return failure("OTA_OPERATIONAL_MESSAGE_INVALID");
 
+    stage = "RECEIPT_CREATE";
     try {
       await prisma.messageLog.create({
         data: {
@@ -213,7 +235,13 @@ export async function deliverOtaOperationalCommunication(
       }).catch(() => {});
       return failure("OTA_OPERATIONAL_SEND_OUTCOME_UNKNOWN");
     }
-  } catch {
-    return failure("OTA_OPERATIONAL_PREFLIGHT_FAILED");
+  } catch (error) {
+    // Static categories only: never log provider bodies, exception text or codes.
+    const known = error instanceof InboxError && [
+      "HOST_INBOX_RESPONSE_INVALID", "HOST_INBOX_THREAD_NOT_FOUND",
+      "HOST_INBOX_APPLICATION_UNAVAILABLE", "HOST_INBOX_RATE_LIMITED",
+      "HOST_INBOX_PROVIDER_UNAVAILABLE", "HOST_INBOX_RESPONSE_LIMIT",
+    ].includes(error.code) ? error.code : "INTERNAL";
+    return failure(`OTA_OPERATIONAL_PREFLIGHT_${stage}_${known}`);
   }
 }

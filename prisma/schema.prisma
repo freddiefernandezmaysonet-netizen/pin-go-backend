@@ -1080,6 +1080,7 @@ model Reservation {
   pinAIActionProposals     PinAIActionProposal[]
   damageCase               DamageCase?
   guestStayLink            GuestStayLink?
+  guestAppActivations     GuestAppActivationChallenge[]
   mobileAccessCredentials  MobileAccessCredential[]
 
   @@unique([propertyId, externalProvider, externalId])
@@ -3389,6 +3390,7 @@ model GuestDeviceSession {
   tokenHash      String      @unique
   deviceLabel    String?
   platform       String?
+  guestAppActivationId String? @unique
   expiresAt      DateTime
   lastSeenAt     DateTime    @default(now())
   revokedAt      DateTime?
@@ -3396,9 +3398,34 @@ model GuestDeviceSession {
   updatedAt      DateTime    @updatedAt
 
   guestPerson    GuestPerson @relation(fields: [guestPersonId], references: [id], onDelete: Cascade)
+  guestAppActivation GuestAppActivationChallenge? @relation(fields: [guestAppActivationId], references: [id])
   mobileAccessCredentials MobileAccessCredential[]
 
   @@index([guestPersonId, revokedAt])
+  @@index([expiresAt])
+}
+
+// OTA activation requires proof from the original booking conversation.
+// Only hashes are stored; neither the verification code nor activation bearer is persisted.
+model GuestAppActivationChallenge {
+  id             String @id
+  reservationId  String
+  guestTokenHash String
+  browserHash    String
+  codeHash       String
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  attempts       Int @default(0)
+  deliveredAt    DateTime?
+  verifiedAt     DateTime?
+  activationTokenHash String? @unique
+  activationExpiresAt DateTime?
+  consumedAt     DateTime?
+  revokedAt      DateTime?
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  deviceSession  GuestDeviceSession?
+
+  @@index([reservationId, createdAt])
   @@index([expiresAt])
 }
 
