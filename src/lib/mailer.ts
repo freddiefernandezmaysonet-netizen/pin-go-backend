@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { getEmailSender } from "./email-senders.js";
 import { buildGuestIncidentEmail, type GuestIncidentEmail } from "./email-templates/guestIncidentEmail.js";
 import {
@@ -96,6 +97,7 @@ type CancellationRefundRuleEmailInput = {
 };
 
 type SendDirectBookingGuestConfirmationInput = {
+  pinAIPropertyScope?: { organizationId: string; propertyId: string };
   demoSimulation?: boolean;
   demoPrecheckinRequired?: boolean;
   demoGuestAgreement?: {
@@ -1475,9 +1477,21 @@ const verificationBlock = demoPrecheckinRequired
         )
       : undefined;
 
+  // Recheck at delivery time, including retries, instead of persisting an enabled flag.
+  let pinAIEnabled = false;
+  if (input.pinAIPropertyScope && process.env.PIN_AI_GUEST_GATEWAY_ENABLED === "true") {
+    try {
+      const { prisma } = await import("./prisma.js");
+      pinAIEnabled = await guestPinAIInformationEnabled(prisma, process.env, input.pinAIPropertyScope);
+    } catch {
+      // Missing optional assistance must never prevent the confirmation email.
+    }
+  }
+
   const emailHtml =
     buildGuestReservationEmail({
       mode: "DIRECT_BOOKING",
+      pinAIEnabled,
 
       reservationNumber,
       guestName,
