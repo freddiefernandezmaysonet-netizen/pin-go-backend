@@ -569,7 +569,15 @@ const prepared = await prepareCleaningTimingConsent({ confirmation, reservation 
 return res.send(renderTimingConsent(token, prepared, language));
      
     } catch (e: any) {
-      if (e instanceof CleaningReassignmentError) return res.status(e.status).send(cleanerPage(`<p role="alert">${language === "es" ? "La oferta o el horario ya no permiten esta acción. Actualiza la limpieza para revisarla." : "The offer or schedule no longer permits this action. Refresh the cleaning to review it."}</p>`, language));
+      if (e instanceof CleaningReassignmentError) {
+        console.warn("[CLEANING_CONFIRM_REJECTED]", { code: e.code });
+        const scheduleConflict = e.code === "CLEANING_SCHEDULE_NOT_VIABLE";
+        const message = scheduleConflict
+          ? (language === "es" ? "No se pudo confirmar. Revisa si tienes otra limpieza en curso sin finalizar o si el tiempo comprometido cabe en esta ventana. Consulta Mis limpiezas o contacta al host."
+            : "Unable to confirm. Check for another unfinished cleaning or whether your committed duration fits this window. Review My cleanings or contact the host.")
+          : (language === "es" ? "La oferta o el horario ya no permiten esta acción. Actualiza la limpieza para revisarla." : "The offer or schedule no longer permits this action. Refresh the cleaning to review it.");
+        return res.status(e.status).send(cleanerPage(`<p role="alert">${message}</p>`, language));
+      }
       console.error("[CLEANING_CONFIRM_CONFIRM_ERROR]", e);
 
       return res.status(500).send(language === "es" ? "No se pudo confirmar la limpieza. Inténtalo de nuevo." : "Failed to confirm cleaning.");

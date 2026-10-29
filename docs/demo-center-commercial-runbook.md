@@ -19,7 +19,7 @@ Objetivo: mostrar cómo Pin&Go coordina una reserva desde su creación hasta el 
 - Entrar como Platform Admin de la organización de esa propiedad. Abrir Demo Center y actualizar Preparación. El correo del principal y el teléfono del cleaner deben coincidir con los participantes disponibles. La demo requiere consentimiento para los SMS del huésped y la invitación del cleaner, incluso fuera de su horario habitual.
 - Tener abiertas las bandejas del huésped y del principal, el teléfono del huésped, el enlace del cleaner y el dashboard del host. El cleaner recibe el idioma configurado en su ficha.
 - Comprobar que la cerradura y su gateway responden. La comprobación de configuración en Demo Center no certifica conectividad física.
-- Elegir entrada y salida en la zona del dispositivo; comprobar la hora y zona de la propiedad en la reserva creada. La pantalla propone entrada en cinco minutos y una estancia de veinte minutos. Puede acortarse la estancia al preparar la demo, sin modificar la configuración global de limpieza.
+- Elegir entrada y salida en la zona del dispositivo; comprobar la hora y zona de la propiedad en la reserva creada. La pantalla propone entrada en cinco minutos y una estancia de dos horas. Puede acortarse la estancia al preparar la demo, sin modificar la configuración global de limpieza.
 - La ventana del cleaner conserva la regla existente: `checkout + offset de la propiedad`, hasta **30 minutos**, limitada por la siguiente ocupación. Con entrada +5 min, estancia de 20 min y offset de 15 min, el cierre completo de accesos ocurre aproximadamente a los 70 min desde la creación, más el ciclo del worker. No prometer que toda esa secuencia ocurre en ocho minutos.
 
 La narración siguiente ocupa unos 8–10 minutos, distribuidos durante el recorrido. Para una presentación breve de principio a fin, grabar **una sola ejecución real ya comprobada**, recortar únicamente las esperas y mostrar que es una grabación con sus horas originales. No mezclar reservas ni presentar una grabación como interacción en vivo.
@@ -43,6 +43,8 @@ La narración siguiente ocupa unos 8–10 minutos, distribuidos durante el recor
 **Cierre.** “Esta fue una sola reserva: comunicaciones, acceso temporal, asistencia al huésped, respuesta del anfitrión y limpieza. Pin&Go conecta esas tareas para reducir el seguimiento manual.” Mostrar el mismo número PG y los estados finales. **Preparar siguiente demo** debe habilitarse cuando terminó la estancia, se registró la limpieza completa y los accesos registrados quedaron cerrados.
 
 ## Si una etapa se interrumpe
+
+- Antes de crear otra ejecución, Demo Center detecta trabajos iniciados sin finalizar del cleaner. Una prueba Demo canónica, sin cobro y con todas sus ventanas de limpieza vencidas puede archivarse administrativamente como interrumpida. Conserva el inicio y la ausencia de finalización, registra actor y motivo en la auditoría y no llama a TTLock, Stripe ni mensajería. Las limpiezas comerciales y las ventanas vigentes requieren su proceso normal de revisión.
 
 - Recargar o usar **Actualizar estado**. Mantener la misma ejecución; no crear otra reserva para tapar un fallo.
 - **Continuar la misma ejecución** retoma lo pendiente y conserva número/token. Las confirmaciones con aceptación registrada no se envían de nuevo.

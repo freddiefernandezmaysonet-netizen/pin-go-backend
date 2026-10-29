@@ -8,6 +8,7 @@ import { readCleanerAccessWindow } from "./cleaner-access-window.service.js";
 import { demoMessageState } from "./internal-demo-message.service.js";
 import { INTERNAL_DEMO_PROPERTY_ID, INTERNAL_DEMO_SOURCE, INTERNAL_DEMO_PROVIDER, isInternalDemo } from "./internal-demo-scope.js";
 import { readDemoGuestNfcDiagnostics } from "./internal-demo-nfc-diagnostics.js";
+import { readDemoCleaningBlockers } from "./internal-demo-cleaning-recovery.service.js";
 
 export type DemoActor = { userId: string; organizationId: string; email: string | null; role: string };
 export class DemoRunError extends Error {
@@ -45,7 +46,9 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
   // PIN_AI_INCIDENT_NOTIFICATIONS_ENABLED switch. It is not an API setting.
   const required = ["PIN_AI_GUEST_GATEWAY_ENABLED", "PIN_AI_RUNTIME_SHADOW_ENABLED", "PIN_AI_RUNTIME_REAL_READ_ENABLED",
     "PIN_AI_INCIDENT_ENABLED", "PIN_AI_HOST_INCIDENT_ENABLED"];
+  const cleaningBlockers = cleaner ? await readDemoCleaningBlockers(db, actor, cleaner.staffMemberId) : [];
   const blockers = [
+    ...(cleaningBlockers.length ? ["CLEANER_UNFINISHED_WORK"] : []),
     ...(!primaryAdmin ? ["PRIMARY_ADMIN_MISSING"] : []),
     ...(!cleaner ? ["CLEANER_MISSING"] : []),
     ...(cleaner && !cleaner.cleaningDurationCommitmentMinutes ? ["CLEANER_COMPLETION_FLOW_NOT_CONFIGURED"] : []),
@@ -65,7 +68,7 @@ export async function readDemoPreparation(db: PrismaClient, actor: DemoActor, en
   ];
   const guestNfcDiagnostics = guestCards.length < 2
     ? await readDemoGuestNfcDiagnostics(db, property.id) : [];
-  return { ready: blockers.length === 0, blockers, guestNfcDiagnostics, property: { id: property.id, name: property.name,
+  return { ready: blockers.length === 0, blockers, cleaningBlockers, guestNfcDiagnostics, property: { id: property.id, name: property.name,
     timezone: property.timezone, cleaningStartOffsetMinutes: property.cleaningStartOffsetMinutes,
     cleaningAccessMinutes: 30 }, primaryAdmin, cleaner: cleaner ? { id: cleaner.staffMemberId,
       name: cleaner.staffMember.fullName, phone: cleaner.staffMember.phoneE164, language: cleaner.staffMember.preferredLanguage } : null,
