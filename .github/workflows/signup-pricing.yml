@@ -9,6 +9,7 @@ on:
       - 'src/routes/public-checkout-error-safety.test.ts'
       - 'src/services/signup-pricing*'
       - 'src/webhooks/stripe.webhook.ts'
+      - 'src/webhooks/signup-onboarding-concurrency.test.ts'
       - '.github/workflows/signup-pricing.yml'
 permissions:
   contents: read
@@ -16,6 +17,20 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fixture
+          POSTGRES_PASSWORD: fixture
+          POSTGRES_DB: pingo_signup_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixture -d pingo_signup_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,6 +44,16 @@ jobs:
         env:
           DATABASE_URL: postgresql://fixture:fixture@localhost:5432/fixture
       - run: node --import tsx --test src/services/signup-pricing.service.test.ts src/routes/public.signup.pricing.test.ts src/routes/public-checkout-error-safety.test.ts src/routes/public-booking.checkout-status.routes.test.ts
+      - name: Prepare isolated signup database
+        run: npx prisma db push --skip-generate
+        env:
+          DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/pingo_signup_test
+      - name: Concurrent signup and replay against real PostgreSQL
+        run: node --import tsx --test src/webhooks/signup-onboarding-concurrency.test.ts
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/pingo_signup_test
+          SIGNUP_TEST_DATABASE_URL: postgresql://fixture:fixture@127.0.0.1:5432/pingo_signup_test
       - run: npx tsc --noEmit --strict --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/routes/public-booking.checkout-status.routes.ts
       - run: npx tsc --noEmit --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/services/signup-pricing.service.ts src/routes/public.signup.routes.ts
       - run: node --input-type=module -e "import {build} from 'esbuild'; await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'/tmp/pingo-server.mjs'});"
