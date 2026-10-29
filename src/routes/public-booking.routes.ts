@@ -1,3 +1,4 @@
+import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
@@ -1098,6 +1099,9 @@ return res.json({
   publicBrand,
   property: {
     ...property,
+    pinAIEnabled: await guestPinAIInformationEnabled(prisma, process.env, {
+      propertyId: property.id, organizationId: property.organizationId,
+    }),
     cancellationPolicy,
     cancellationPolicyPresentation,
     propertyProtection: property.propertyProtectionEnabled
@@ -1575,6 +1579,7 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
         id: true,
         organizationId: true,
         name: true,
+        slug: true,
         publicTitle: true,
         baseNightlyRate: true,
         cleaningFee: true,
@@ -1894,7 +1899,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       success_url:
         `${APP_URL}/booking/success?organization=${encodeURIComponent(
           String(property.organization.slug)
-        )}&identityCheck=${
+        )}&property=${encodeURIComponent(String(property.slug ?? ""))}&identityCheck=${
           identityVerificationRequired
             ? "required"
             : "optional"

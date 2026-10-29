@@ -6,6 +6,7 @@ export type GuestReservationEmailMode =
 
 export interface GuestReservationEmailInput {
   mode: GuestReservationEmailMode;
+  pinAIEnabled?: boolean;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -445,11 +446,12 @@ export function buildGuestReservationEmail(
                 : "Before leaving, review your checkout time and your accommodation’s departure instructions."}</li>
             </ol>
           </div>
+          ${input.pinAIEnabled === true ? `
           <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:20px 0;">
             <h3 style="margin:0 0 8px;">${isSpanish ? "Conoce Pin AI, el asistente de tu estadía" : "Meet Pin AI, your stay assistant"}</h3>
             <p style="margin:0 0 10px;">${isSpanish
-              ? "Si tu alojamiento ofrece Pin AI, abre Administrar reservación y busca el chat de Pin AI. Puedes usar este asistente de inteligencia artificial desde el navegador, sin instalar una app, y escribir en español o inglés."
-              : "If your accommodation offers Pin AI, open Manage reservation and find the Pin AI chat. You can use this AI assistant in your browser without installing an app, and write in English or Spanish."}</p>
+              ? "Tu alojamiento tiene Pin AI activo. Abre Administrar reservación y busca el chat de Pin AI. Puedes usar este asistente de inteligencia artificial desde el navegador, sin instalar una app, y escribir en español o inglés."
+              : "Your accommodation has Pin AI enabled. Open Manage reservation and find the Pin AI chat. You can use this AI assistant in your browser without installing an app, and write in English or Spanish."}</p>
             <p style="margin:0 0 10px;">${isSpanish
               ? "Puedes preguntar cómo acceder al alojamiento, cómo conectarte al Wi-Fi o qué hacer si la televisión no funciona. También puedes consultar si es posible solicitar una salida más tarde. Las respuestas dependen de la información proporcionada por el anfitrión."
               : "You can ask how to access the accommodation, how to connect to Wi-Fi, or what to do if the TV is not working. You can also ask whether a later checkout can be requested. Answers depend on information supplied by the host."}</p>
@@ -460,6 +462,7 @@ export function buildGuestReservationEmail(
               ? "Tu enlace de reservación es privado. Evita compartirlo."
               : "Your reservation link is private. Avoid sharing it."}</p>
           </div>
+          ` : ""}
           ` : ""}
 
           ${cancellationPolicyBlock}
