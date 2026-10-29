@@ -1,5 +1,6 @@
 import { haasPriceIds } from "../services/signup-pricing.service.js";
 import { recordHaasPayment } from "../services/haas-admin.service.js";
+import { persistSubscriptionWithGrace } from "../services/subscription-grace.service.js";
 import type { Express, Request, Response } from "express";
 import bodyParser from "body-parser";
 import Stripe from "stripe";
@@ -173,6 +174,7 @@ export function registerStripeWebhook(app: Express) {
             if (session.subscription) {
               await safeSyncBySubscriptionId(String(session.subscription), {
                 source: "checkout.session.completed",
+                observedAt: new Date(event.created * 1000),
                 session,
               });
             }
@@ -187,7 +189,7 @@ export function registerStripeWebhook(app: Express) {
             if (session.metadata?.pendingSignupId && session.metadata.haasPlan === "haas" && session.payment_status === "paid") {
               await maybeCompleteSignupOnboarding(session);
               await recordHaasPayment(prisma, session, new Date(event.created * 1000));
-              if (session.subscription) await safeSyncBySubscriptionId(String(session.subscription), { source: event.type, session });
+              if (session.subscription) await safeSyncBySubscriptionId(String(session.subscription), { source: event.type, session, observedAt: new Date(event.created * 1000) });
               break;
             }
 
@@ -268,6 +270,7 @@ export function registerStripeWebhook(app: Express) {
 
             await safeSyncBySubscriptionId(sub.id, {
               source: event.type,
+              observedAt: new Date(event.created * 1000),
             });
 
             break;
@@ -510,12 +513,13 @@ if (!isSignupOnboarding) {
 
 type SyncContext = {
   source: string;
+  observedAt: Date;
   session?: Stripe.Checkout.Session;
 };
 
 async function safeSyncBySubscriptionId(
   subscriptionId: string,
-  context?: SyncContext
+  context: SyncContext
 ) {
   const fullSub = await stripe.subscriptions.retrieve(subscriptionId, {
     expand: ["items.data.price"],
@@ -686,7 +690,7 @@ for (const item of items) {
   const entitledSmartProperties =
     status === "ACTIVE" || status === "TRIALING" ? smartQty : 0;
 
-  await prisma.subscription.upsert({
+  await persistSubscriptionWithGrace(prisma, {
     where: { organizationId },
     create: {
       organizationId,
@@ -723,7 +727,7 @@ for (const item of items) {
         ? new Date(fullSub.current_period_end * 1000)
         : null,
     },
-  });
+  }, context.observedAt);
 
   console.log("✅ Stripe subscription synced", {
     source: context?.source ?? "unknown",
