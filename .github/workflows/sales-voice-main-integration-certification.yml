@@ -54,16 +54,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           const hostCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-mobile-operations-20261016';
           const inboxCandidate = process.env.GITHUB_HEAD_REF === 'agent/host-notification-inbox-20261018';
-          const prismaConfigCandidate = process.env.GITHUB_HEAD_REF === 'agent/prisma-config-security-20261029';
-          if (prismaConfigCandidate) {
-            const paths = execFileSync('git',['diff','--name-only','origin/main...HEAD'],{encoding:'utf8'}).trim().split('\n').sort();
-            assert.deepEqual(paths, [
-              '.github/workflows/sales-voice-main-integration-certification.yml',
-              '.github/workflows/signup-pricing.yml',
-              'package-lock.json', 'package.json',
-              'src/services/prisma-config-security.test.ts',
-            ].sort());
-          } else if (inboxCandidate) {
+          if (inboxCandidate) {
             execFileSync('node', ['--test', 'scripts/verify-host-notification-inbox-scope.test.mjs'], {stdio:'inherit'});
             execFileSync('node', ['scripts/verify-host-notification-inbox-scope.mjs'], {stdio:'inherit'});
           } else if (hostCandidate) {

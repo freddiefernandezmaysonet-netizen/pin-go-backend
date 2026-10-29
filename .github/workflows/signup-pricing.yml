@@ -3,10 +3,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'package.json'
-      - 'package-lock.json'
-      - 'prisma.config.ts'
-      - 'src/services/prisma-config-security.test.ts'
       - 'src/routes/public.signup*'
       - 'src/routes/public-booking.routes.ts'
       - 'src/routes/public-booking.checkout-status*'
@@ -44,7 +40,6 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node --import tsx --test src/services/prisma-config-security.test.ts
       - run: npx prisma generate
         env:
           DATABASE_URL: postgresql://fixture:fixture@localhost:5432/fixture

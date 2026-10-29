@@ -178,7 +178,8 @@
     "pin-ai:benchmark:canary:018": "node --import tsx src/pin-ai/benchmark/canary-018-luna.ts",
     "pin-ai:benchmark:canary:019": "node --import tsx src/pin-ai/benchmark/canary-019-luna.ts",
     "pin-ai:benchmark:canary:020": "node --import tsx src/pin-ai/benchmark/canary-020-luna.ts",
-    "pin-ai:benchmark:usage-reconcile": "node --import tsx src/pin-ai/benchmark/reconcile-provider-usage.ts"
+    "pin-ai:benchmark:usage-reconcile": "node --import tsx src/pin-ai/benchmark/reconcile-provider-usage.ts",
+    "test:prisma-config-security": "node --input-type=module -e 'import assert from \"node:assert/strict\";import {createRequire} from \"node:module\";const r=createRequire(import.meta.url),c=createRequire(r.resolve(\"@prisma/config\"));const {deepmerge}=c(\"deepmerge-ts\");const a={};a.self=a;const b={};b.self=b;try{deepmerge(a,b)}catch(e){assert.notEqual(e.name,\"RangeError\")}assert.deepEqual(deepmerge({a:1},{b:2}),{a:1,b:2});console.log(\"Prisma config security regression passed\");'"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
