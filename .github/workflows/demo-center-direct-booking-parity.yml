@@ -57,6 +57,8 @@ jobs:
         run: node --import tsx --test src/services/guest-passcode-provision.service.test.ts
       - name: Read-only NFC diagnostics and error redaction
         run: node --import tsx --test src/services/internal-demo-nfc-diagnostics.test.ts
+      - name: Expired Demo cleanup authorization and evidence
+        run: node --import tsx --test src/services/internal-demo-cleaning-recovery.service.test.ts
       - name: Demo participant registration and bilingual invitation
         run: node --import tsx --test src/services/internal-demo-real-precheckin.test.ts
   connected-commercial-demo:

@@ -526,6 +526,37 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: returning.id } })).accessCodeEnc!), "0001",
       "a confirmed revoked and deleted PIN may be reused without rewriting the old access");
   });
+  await t.test("expired unfinished Demo blocks preparation and can be archived without inventing completion", async () => {
+    const past = new Date(Date.now() - 10 * 86400000);
+    const old = await db.reservation.create({ data: { propertyId, guestName: "Synthetic abandoned Demo",
+      source: "INTERNAL_DEMO_DIRECT_BOOKING", externalProvider: "PIN_GO_INTERNAL_DEMO", externalId: "DEMO-archive-regression",
+      externalRaw: { demo: true, paymentSimulated: true }, status: "ACTIVE", paymentState: "PAID", totalAmount: 0,
+      checkIn: new Date(past.getTime() - 1200000), checkOut: past } });
+    const offer = await db.cleaningConfirmation.create({ data: { reservationId: old.id, propertyId,
+      staffMemberId: cleaner.id, token: "synthetic-expired-archive-offer", status: "CONFIRMED" } });
+    const started = new Date(past.getTime() + 20 * 60000);
+    const work = await db.cleaningWork.create({ data: { reservationId: old.id, propertyId, staffMemberId: cleaner.id,
+      confirmationId: offer.id, scheduledStartAt: new Date(past.getTime() + 15 * 60000), durationCommitmentMinutes: 30,
+      startConfirmationGraceMinutes: 10, followupGraceMinutes: 15, startConfirmedAt: started } });
+    const transportsBefore = [emails.length, sms.length, hardware.length];
+    let prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
+    assert.ok(prep.data.blockers.includes("CLEANER_UNFINISHED_WORK"));
+    assert.equal(prep.data.cleaningBlockers.find((w: any) => w.workId === work.id)?.canArchive, true);
+    const archive = (role = "PLATFORM_ADMIN") => fetch(`${base}/api/internal/admin/demo/archive-expired-cleaning`, {
+      method: "POST", headers: { "content-type": "application/json", "x-test-role": role }, body: JSON.stringify({ workId: work.id }),
+    });
+    assert.equal((await archive("ORG_ADMIN")).status, 403);
+    assert.equal((await archive()).status, 200);
+    assert.equal((await (await archive()).json() as any).data.replayed, true);
+    const saved = await db.cleaningWork.findUniqueOrThrow({ where: { id: work.id } });
+    assert.equal(saved.startConfirmedAt!.getTime(), started.getTime());
+    assert.equal(saved.completionConfirmedAt, null); assert.ok(saved.cancelledAt);
+    assert.equal((await db.cleaningConfirmation.findUniqueOrThrow({ where: { id: offer.id } })).status, "CANCELLED");
+    assert.equal(await db.apmsAuditEntry.count({ where: { decisionId: `demo-cleaning-abandoned:${work.id}` } }), 1);
+    prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
+    assert.equal(prep.data.cleaningBlockers.some((w: any) => w.workId === work.id), false);
+    assert.deepEqual([emails.length, sms.length, hardware.length], transportsBefore);
+  });
   assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: commercial.id } }), commercial);
   assert.equal((await db.property.findUniqueOrThrow({ where: { id: propertyId } })).cleaningDurationMinutes, 240);
   assert.equal(await db.webhookEventIngest.count(), 0);

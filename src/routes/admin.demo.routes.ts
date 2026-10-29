@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { processWebhookEventById } from "../pms/ingest/webhook.processor";
 import { DemoRunError, readDemoPreparation, readDemoRun, runInternalDemo } from "../services/internal-demo-run.service";
+import { archiveExpiredDemoCleaning, DemoCleaningRecoveryError } from "../services/internal-demo-cleaning-recovery.service.js";
 
 const prisma = new PrismaClient();
 export function buildAdminDemoRunRouter(db = prisma, deps?: Parameters<typeof runInternalDemo>[3], env = process.env) {
@@ -10,13 +11,18 @@ const router = Router();
 const actor = (req: any) => ({ userId: req.user?.id, organizationId: req.user?.orgId,
   email: req.user?.email ?? null, role: req.user?.role });
 function failure(res: any, error: unknown) {
-  return res.status(error instanceof DemoRunError ? error.status : 500).json({ ok: false,
+  return res.status(error instanceof DemoRunError || error instanceof DemoCleaningRecoveryError ? error.status : 500).json({ ok: false,
     safeToEdit: error instanceof DemoRunError && error.safeToEdit,
-    error: error instanceof DemoRunError ? error.code : "DEMO_OPERATION_FAILED" });
+    error: error instanceof DemoRunError || error instanceof DemoCleaningRecoveryError ? error.code : "DEMO_OPERATION_FAILED" });
 }
 router.get("/api/internal/admin/demo/preparation", requireAuth, async (req, res) => {
   res.setHeader("Cache-Control", "no-store, private");
   try { res.json({ ok: true, data: await readDemoPreparation(db, actor(req), env) }); }
+  catch (error) { failure(res, error); }
+});
+router.post("/api/internal/admin/demo/archive-expired-cleaning", requireAuth, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store, private");
+  try { res.json({ ok: true, data: await archiveExpiredDemoCleaning(db, actor(req), String(req.body?.workId ?? "")) }); }
   catch (error) { failure(res, error); }
 });
 router.get("/api/internal/admin/demo/runs/:requestId", requireAuth, async (req, res) => {
