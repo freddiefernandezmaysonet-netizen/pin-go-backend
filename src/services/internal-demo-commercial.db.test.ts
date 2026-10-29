@@ -538,7 +538,16 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     const work = await db.cleaningWork.create({ data: { reservationId: old.id, propertyId, staffMemberId: cleaner.id,
       confirmationId: offer.id, scheduledStartAt: new Date(past.getTime() + 15 * 60000), durationCommitmentMinutes: 30,
       startConfirmationGraceMinutes: 10, followupGraceMinutes: 15, startConfirmedAt: started } });
+    const future = new Date(Date.now() + 100 * 86400000);
+    const candidate = await db.reservation.create({ data: { propertyId, guestName: "Synthetic next Demo",
+      source: "INTERNAL_DEMO_DIRECT_BOOKING", status: "ACTIVE", paymentState: "PAID",
+      checkIn: new Date(future.getTime() - 1200000), checkOut: future } });
+    const candidateOffer = await db.cleaningConfirmation.create({ data: { reservationId: candidate.id, propertyId,
+      staffMemberId: cleaner.id, token: "synthetic-next-demo-offer", status: "PENDING" } });
     const transportsBefore = [emails.length, sms.length, hardware.length];
+    const rejected = await fetch(`${base}/cleaning/confirm/${candidateOffer.token}/confirm`, { method: "POST" });
+    assert.equal(rejected.status, 409, "reproduce the early availability rejection with an unfinished old Demo");
+    assert.match(await rejected.text(), /otra limpieza en curso sin finalizar/);
     let prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
     assert.ok(prep.data.blockers.includes("CLEANER_UNFINISHED_WORK"));
     assert.equal(prep.data.cleaningBlockers.find((w: any) => w.workId === work.id)?.canArchive, true);
@@ -553,6 +562,9 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal(saved.completionConfirmedAt, null); assert.ok(saved.cancelledAt);
     assert.equal((await db.cleaningConfirmation.findUniqueOrThrow({ where: { id: offer.id } })).status, "CANCELLED");
     assert.equal(await db.apmsAuditEntry.count({ where: { decisionId: `demo-cleaning-abandoned:${work.id}` } }), 1);
+    const { acceptCleaningOffer } = await import("./cleaning-reassignment.service.js");
+    assert.equal((await acceptCleaningOffer(db, { confirmationId: candidateOffer.id, staffMemberId: cleaner.id,
+      organizationId: org.id })).replayed, false, "the same guarded eligibility now accepts a future offer");
     prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
     assert.equal(prep.data.cleaningBlockers.some((w: any) => w.workId === work.id), false);
     assert.deepEqual([emails.length, sms.length, hardware.length], transportsBefore);
