@@ -16,7 +16,7 @@ test("guest and signup checkout failures never return or log provider secrets", 
   const logs: unknown[][] = [];
   t.mock.method(console, "error", (...args: unknown[]) => { logs.push(args); });
   const original = publicBookingDb.property.findFirst;
-  publicBookingDb.property.findFirst = (async () => { throw providerError; }) as typeof original;
+  publicBookingDb.property.findFirst = (async () => { throw providerError; }) as unknown as typeof original;
   t.after(() => { publicBookingDb.property.findFirst = original; });
   t.mock.method(stripe.prices, "retrieve", async () => { throw providerError; });
   const app = express(); app.use(express.json());
