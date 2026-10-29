@@ -400,7 +400,7 @@ export function registerStripeWebhook(app: Express) {
   );
 }
 
-async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
+export async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session, db: PrismaClient = prisma) {
  const metadata = session.metadata ?? {};
 const flow = String(metadata.flow ?? "").trim();
 const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
@@ -418,7 +418,11 @@ if (!isSignupOnboarding) {
     return;
   }
 
-  const pending = await prisma.pendingSignup.findUnique({
+  await db.$transaction(async (tx) => {
+    // Different Stripe events for the same checkout have different ledger IDs.
+    // Serialize the signup itself and re-read completion under the row lock.
+    await tx.$queryRaw`SELECT "id" FROM "PendingSignup" WHERE "id" = ${pendingSignupId} FOR UPDATE`;
+    const pending = await tx.pendingSignup.findUnique({
     where: { id: pendingSignupId },
   });
 
@@ -432,7 +436,7 @@ if (!isSignupOnboarding) {
 
   if (pending.status === PendingSignupStatus.COMPLETED && pending.organizationId) {
     // Igual actualizamos IDs Stripe por si faltan
-    await prisma.pendingSignup.update({
+    await tx.pendingSignup.update({
       where: { id: pending.id },
       data: {
         stripeCustomerId: session.customer
@@ -447,7 +451,6 @@ if (!isSignupOnboarding) {
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
     let organizationId = pending.organizationId ?? null;
 
     if (!organizationId) {
