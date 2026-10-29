@@ -465,6 +465,32 @@ export function buildGuestReservationEmail(
           ` : ""}
           ` : ""}
 
+          ${manageReservationBlock ? `
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:20px 0;color:#1e3a8a;">
+            <h3 style="margin:0 0 8px;">Pin&amp;Go Guest</h3>
+            <p>${isSpanish
+              ? "Lleva tu reservación en tu teléfono. La app es opcional; su descarga pública para iPhone y Android estará disponible al completarse la aprobación en App Store y Google Play. Mientras tanto, puedes continuar en el navegador desde los enlaces seguros de este correo."
+              : "Keep your reservation on your phone. The app is optional; public downloads for iPhone and Android will be available once App Store and Google Play approval is complete. Meanwhile, you can continue in your browser using this email’s secure links."}</p>
+            <ol style="padding-left:22px;">
+              <li>${isSpanish
+                ? "Cuando esté publicada, descarga Pin&Go Guest desde App Store (iPhone) o Google Play (Android). Si ya está instalada, continúa."
+                : "Once published, download Pin&Go Guest from the App Store (iPhone) or Google Play (Android). If already installed, continue."}</li>
+              <li>${isSpanish
+                ? "En ese mismo teléfono, abre el enlace de registro o acceso de tu reservación y selecciona Usar Pin&Go Guest. Solicita el código de verificación que recibirás en el correo de tu reservación y confirma el dispositivo. No es el PIN de la puerta."
+                : "On that same phone, open your reservation’s registration or access link and select Use Pin&Go Guest. Request the verification code sent to your reservation email and confirm the device. This is not your door PIN."}</li>
+              <li>${isSpanish
+                ? "Pulsa Abrir en Pin&Go Guest para vincular la estadía. Consulta tu reserva en Stay, tu acceso y horario en Access y la ayuda en Help."
+                : "Tap Open in Pin&Go Guest to link your stay. Review your reservation in Stay, entry details and times in Access, and assistance in Help."}</li>
+              <li>${isSpanish
+                ? "Si Access muestra una llave Bluetooth, activa Bluetooth, permite los permisos solicitados y acércate a la cerradura para abrir desde Access. La disponibilidad depende del alojamiento, del registro completo y del horario autorizado."
+                : "If Access shows a Bluetooth key, turn on Bluetooth, allow requested permissions, and stand near the lock to unlock from Access. Availability depends on the accommodation, completed registration, and authorized times."}</li>
+            </ol>
+            <p style="margin-bottom:0;">${isSpanish
+              ? "Guarda este correo y vuelve al enlace de tu reservación después de instalar la app. Si no abre, continúa en el navegador. No compartas enlaces privados, códigos de verificación ni credenciales de acceso."
+              : "Keep this email and return to your reservation link after installing the app. If it does not open, continue in your browser. Do not share private links, verification codes, or access credentials."}</p>
+          </div>
+          ` : ""}
+
           ${cancellationPolicyBlock}
 
           <!-- SMART ACCESS -->
