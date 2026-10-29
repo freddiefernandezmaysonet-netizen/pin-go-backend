@@ -1,3 +1,4 @@
+import { buildCheckoutStatusRouter } from "./public-booking.checkout-status.routes.js";
 import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
@@ -46,6 +47,7 @@ export const publicBookingDb = new PrismaClient();
 const prisma = publicBookingDb;
 const publicBookingRouter = Router();
 publicBookingRouter.use(damagePaymentAuthorizationRouter(prisma));
+publicBookingRouter.use(buildCheckoutStatusRouter(prisma));
 
 const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
   "secure_precheckin_disclosure_v1";
@@ -1900,7 +1902,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       success_url:
         `${APP_URL}/booking/success?organization=${encodeURIComponent(
           String(property.organization.slug)
-        )}&property=${encodeURIComponent(String(property.slug ?? ""))}&identityCheck=${
+        )}&property=${encodeURIComponent(String(property.slug ?? ""))}&session_id={CHECKOUT_SESSION_ID}&identityCheck=${
           identityVerificationRequired
             ? "required"
             : "optional"
