@@ -42,7 +42,8 @@ import {
   type PublishedBrandContext,
 } from "../services/branding/published-brand-context.service.js";
 
-const prisma = new PrismaClient();
+export const publicBookingDb = new PrismaClient();
+const prisma = publicBookingDb;
 const publicBookingRouter = Router();
 publicBookingRouter.use(damagePaymentAuthorizationRouter(prisma));
 
@@ -1992,10 +1993,10 @@ const guestAcceptedSecurePreCheckinRequirementText =
      pricing, 
     });
   } catch (error: any) {
-    console.error("[public-booking create-checkout error]", error?.message ?? error);
+    console.error("[public-booking create-checkout error]", { code: "CHECKOUT_CREATE_FAILED" });
     return res.status(500).json({
       ok: false,
-      error: error?.message ?? "Failed to create checkout",
+      error: "Failed to create checkout",
     });
   }
 });

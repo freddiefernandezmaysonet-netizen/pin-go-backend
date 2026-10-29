@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'src/routes/public.signup*'
+      - 'src/routes/public-booking.routes.ts'
+      - 'src/routes/public-checkout-error-safety.test.ts'
       - 'src/services/signup-pricing*'
       - 'src/webhooks/stripe.webhook.ts'
       - '.github/workflows/signup-pricing.yml'
@@ -25,6 +27,6 @@ jobs:
       - run: npx prisma generate
         env:
           DATABASE_URL: postgresql://fixture:fixture@localhost:5432/fixture
-      - run: node --import tsx --test src/services/signup-pricing.service.test.ts src/routes/public.signup.pricing.test.ts
+      - run: node --import tsx --test src/services/signup-pricing.service.test.ts src/routes/public.signup.pricing.test.ts src/routes/public-checkout-error-safety.test.ts
       - run: npx tsc --noEmit --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/services/signup-pricing.service.ts src/routes/public.signup.routes.ts
       - run: node --input-type=module -e "import {build} from 'esbuild'; await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'/tmp/pingo-server.mjs'});"
