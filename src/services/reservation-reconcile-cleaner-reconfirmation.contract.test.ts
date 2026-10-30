@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { planCleaningWindow } from "./reservation-cleaning-window";
+import { isHistoricalDemoWithoutCleanerAccess, planCleaningWindow } from "./reservation-cleaning-window";
 import { planCleanerAccessWindow } from "./cleaner-access-window.policy";
 
 async function readReservationReconcileService() {
@@ -137,4 +137,38 @@ test("replacement and reconciliation snapshot share a transaction before dispatc
   const snapshot = source.indexOf("lastReconciledAt: now");
   assert.ok(create >= 0 && snapshot > create);
   assert.doesNotMatch(source, /dispatchPendingCleaningConfirmation/);
+});
+
+const historicalDemo = {
+  propertyId: "cmomyua8b0001rv1dvl6xjr6g", source: "LODGIFY",
+  checkOut: new Date("2026-10-05T20:20:00Z"), assignments: [],
+  now: new Date("2026-10-30T22:00:00Z"),
+};
+
+test("historical Lodgify demo imports without cleaner access do not reopen turnover planning", async () => {
+  assert.equal(isHistoricalDemoWithoutCleanerAccess(historicalDemo), true);
+  assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...historicalDemo,
+    assignments: [{ role: "CLEANING", status: "ENDED" }, { role: "CLEANING", status: "FAILED" }] }), true);
+  const source = await readReservationReconcileService();
+  assert.match(source, /if \(reconcileCleanerWindow\) \{/);
+  assert.match(source, /enabled: reconcileCleanerWindow/);
+  assert.equal(planCleaningWindow({ ...base, enabled: false, accessWindow: null,
+    checkOut: historicalDemo.checkOut }).requiresReconfirmation, false);
+});
+
+test("the historical exception never grows to current stays or other properties and sources", () => {
+  for (const override of [
+    { propertyId: "ordinary-property" }, { source: "MANUAL" },
+    { source: "INTERNAL_DEMO_DIRECT_BOOKING" },
+    { checkOut: new Date("2026-10-06T00:00:00Z") },
+    { checkOut: new Date("2026-10-31T00:00:00Z") },
+    { now: new Date("2026-10-05T20:00:00Z") },
+    { checkOut: new Date(NaN) }, { now: new Date(NaN) },
+  ]) assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...historicalDemo, ...override }), false);
+});
+
+test("every unresolved cleaner status retains safety reconciliation, including expired grants", () => {
+  for (const status of ["ACTIVE", "SCHEDULED", "PENDING", "PROVISIONING", "UNKNOWN"])
+    assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...historicalDemo,
+      assignments: [{ role: "CLEANING", status }] }), false);
 });
