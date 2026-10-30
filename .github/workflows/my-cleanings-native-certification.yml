@@ -60,7 +60,11 @@ jobs:
           base=c97cb69f7c8e531bced491cdd5588c2c74510963
           mkdir -p .native-baseline
           git archive "$base" prisma | tar -x -C .native-baseline
-          npx prisma migrate diff --from-empty --to-schema-datamodel .native-baseline/prisma --script > .native-baseline/base.sql
+          # Build the whole disposable schema, including auth tables marked external
+          # in production's Prisma config; later migrations depend on AuthSession.
+          printf '%s\n' 'import { defineConfig } from "prisma/config";' 'export default defineConfig({ schema: "prisma" });' > .native-baseline/prisma.config.ts
+          npx prisma migrate diff --config .native-baseline/prisma.config.ts --from-empty --to-schema-datamodel .native-baseline/prisma --script > .native-baseline/base.sql
+          grep -q 'CREATE TABLE "AuthSession"' .native-baseline/base.sql
           psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -f .native-baseline/base.sql
           psql "$CLEANER_SQL_URL" -v ON_ERROR_STOP=1 -c 'INSERT INTO "Organization" (id,name,"updatedAt") VALUES ('"'"'native-legacy-org'"'"','"'"'Synthetic legacy'"'"',NOW()); INSERT INTO "StaffMember" (id,"organizationId","fullName","ttlockCardRef","updatedAt") VALUES ('"'"'native-legacy-staff'"'"','"'"'native-legacy-org'"'"','"'"'Synthetic cleaner'"'"','"'"'legacy-card'"'"',NOW());'
           git diff --name-only --diff-filter=A "$base" HEAD -- prisma/migrations | sort | while IFS= read -r migration; do
