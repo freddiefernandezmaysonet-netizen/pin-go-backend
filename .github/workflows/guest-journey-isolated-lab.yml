@@ -1,0 +1,70 @@
+name: Guest Journey Isolated Lab
+
+on:
+  pull_request:
+    paths:
+      - "src/guest-journey-lab/**"
+      - "src/services/guest-journey-communications-*.ts"
+      - ".github/workflows/guest-journey-isolated-lab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: guest_journey_lab
+          POSTGRES_PASSWORD: synthetic-ci-password
+          POSTGRES_DB: guest_journey_lab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U guest_journey_lab -d guest_journey_lab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      RAILWAY_PROJECT_ID: 10619a4a-d72c-4997-b08d-4bad1b0fe60b
+      RAILWAY_ENVIRONMENT_ID: 437014cf-52bf-4c3c-a92a-e1738d01d712
+      RAILWAY_ENVIRONMENT_NAME: guest-journey-test
+      GUEST_JOURNEY_LAB_MODE: simulation
+      GUEST_JOURNEY_LAB_ROLE: api
+      OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS: AIRBNB,BOOKING_COM
+      DATABASE_URL: postgresql://guest_journey_lab:synthetic-ci-password@postgres.railway.internal:5432/guest_journey_lab
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: echo '127.0.0.1 postgres.railway.internal' | sudo tee -a /etc/hosts
+      - run: npm ci
+      - name: Compile laboratory
+        run: >-
+          npx tsc --noEmit --strict --skipLibCheck --module preserve
+          --moduleResolution bundler --target esnext --types node
+          src/guest-journey-lab/main.ts src/guest-journey-lab/isolation.test.ts
+          src/guest-journey-lab/runtime.db.test.ts
+          src/guest-journey-lab/precheckin-shadow.policy.test.ts
+          src/services/guest-journey-communications-recovery.service.test.ts
+      - name: Verify isolation and E7 regressions
+        run: |
+          node --import tsx --test src/guest-journey-lab/isolation.test.ts
+          node --import tsx --test src/guest-journey-lab/precheckin-shadow.policy.test.ts src/services/preCheckinSms.late-consent.test.js
+          node --import tsx --test src/services/guest-journey-communications-recovery.service.test.ts
+          npm run test:guest-journey-enterprise-e7-communications
+      - name: Apply migrations only to disposable PostgreSQL
+        run: node --import tsx src/guest-journey-lab/main.ts --prepare
+      - name: Certify real E4/E7 persistence and repeat execution
+        run: node --import tsx --test src/guest-journey-lab/runtime.db.test.ts
+      - name: Bundle laboratory
+        run: >-
+          npx esbuild src/guest-journey-lab/main.ts --bundle --platform=node
+          --packages=external --format=esm --outfile=/tmp/guest-journey-lab.mjs
