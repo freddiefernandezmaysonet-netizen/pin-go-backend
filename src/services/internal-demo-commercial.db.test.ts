@@ -295,6 +295,40 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal((await sendInternalDemoMessage(uncertain)).status, "ATTENTION_REQUIRED");
     assert.equal((await sendInternalDemoMessage(uncertain)).ok, false); assert.equal(attempts, 1);
   });
+  await t.test("concurrent Demo message replays send once without database errors and preserve unknown outcomes", async () => {
+    const { sendInternalDemoMessage } = await import("./internal-demo-message.service.js");
+    const messageDb = new PrismaClient({ log: [{ emit: "event", level: "error" }] });
+    const errors: string[] = [];
+    messageDb.$on("error", event => errors.push(event.message));
+    let attempts = 0;
+    const message = { prisma: messageDb, reservationId, propertyId, organizationId: org.id,
+      type: "SYNTHETIC_CONCURRENT_REPLAY_TEST", channel: "email" as const,
+      to: "concurrent@example.invalid", body: "Synthetic replay test", send: async () => {
+        attempts++;
+        return { id: "synthetic-concurrent-provider-id" };
+      } };
+    try {
+      const batch = await Promise.all(Array.from({ length: 8 }, () => sendInternalDemoMessage(message)));
+      assert.equal(attempts, 1);
+      assert.equal(new Set(batch.map(row => row.messageId)).size, 1);
+      const replay = await sendInternalDemoMessage(message);
+      assert.equal(replay.status, "ACCEPTED");
+      assert.equal(replay.providerMessageId, "synthetic-concurrent-provider-id");
+      assert.equal(await db.messageLog.count({ where: { id: replay.messageId } }), 1);
+      assert.equal(await db.messageDispatchLog.count({ where: { reservationId, type: message.type } }), 1);
+
+      const ambiguous = { ...message, type: "SYNTHETIC_CONCURRENT_UNKNOWN_TEST", send: async () => {
+        attempts++; throw new Error("synthetic provider result unknown");
+      } };
+      const unknown = await Promise.all(Array.from({ length: 8 }, () => sendInternalDemoMessage(ambiguous)));
+      assert.ok(unknown.every(row => !row.ok));
+      assert.equal((await sendInternalDemoMessage(ambiguous)).status, "ATTENTION_REQUIRED");
+      assert.equal(attempts, 2, "replays must never contact the provider again");
+      assert.equal(await db.messageLog.count({ where: { id: unknown[0].messageId } }), 1);
+      assert.equal(await db.messageDispatchLog.count({ where: { reservationId, type: ambiguous.type } }), 0);
+      assert.deepEqual(errors, [], "expected replays must not produce database errors");
+    } finally { await messageDb.$disconnect(); }
+  });
   await t.test("real grant service provisions exact minute window only on Demo lock; guest NFC uses same dates", async () => {
     // Explicit synthetic verification fixture for the hardware portion only.
     // Demo creation above must leave acceptance to the participant.
