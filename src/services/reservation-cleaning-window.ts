@@ -30,7 +30,7 @@ export function planCleaningWindow(input: {
     requiresAccessReschedule: input.enabled && accessChanged };
 }
 
-/** Legacy Lodgify demo imports audited on 2026-10-30 ended by October 5.
+/** Legacy Lodgify/manual demo records audited on 2026-10-30 ended by October 5.
  * A fixed cutoff prevents this exception from expanding to future demo stays.
  * Any unresolved cleaner assignment still requires the normal safety reconciliation,
  * even when its recorded end date is already past.
@@ -43,7 +43,7 @@ export function isHistoricalDemoWithoutCleanerAccess(input: {
   now: Date;
 }) {
   const checkout = input.checkOut.getTime();
-  return input.propertyId === INTERNAL_DEMO_PROPERTY_ID && input.source === "LODGIFY" &&
+  return input.propertyId === INTERNAL_DEMO_PROPERTY_ID && (input.source === "LODGIFY" || input.source === "MANUAL") &&
     Number.isFinite(checkout) && Number.isFinite(input.now.getTime()) &&
     checkout < Date.parse("2026-10-06T00:00:00Z") && checkout < input.now.getTime() &&
     !input.assignments.some(a => a.role === "CLEANING" && a.status !== "ENDED" && a.status !== "FAILED");

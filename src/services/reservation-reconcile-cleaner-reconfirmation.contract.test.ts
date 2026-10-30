@@ -158,7 +158,7 @@ test("historical Lodgify demo imports without cleaner access do not reopen turno
 
 test("the historical exception never grows to current stays or other properties and sources", () => {
   for (const override of [
-    { propertyId: "ordinary-property" }, { source: "MANUAL" },
+    { propertyId: "ordinary-property" }, { source: "DIRECT_BOOKING" },
     { source: "INTERNAL_DEMO_DIRECT_BOOKING" },
     { checkOut: new Date("2026-10-06T00:00:00Z") },
     { checkOut: new Date("2026-10-31T00:00:00Z") },
@@ -171,4 +171,12 @@ test("every unresolved cleaner status retains safety reconciliation, including e
   for (const status of ["ACTIVE", "SCHEDULED", "PENDING", "PROVISIONING", "UNKNOWN"])
     assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...historicalDemo,
       assignments: [{ role: "CLEANING", status }] }), false);
+});
+
+test("audited historical manual Demo stays share the bounded exception", () => {
+  const manual = { ...historicalDemo, source: "MANUAL", checkOut: new Date("2026-09-21T15:00:00Z") };
+  assert.equal(isHistoricalDemoWithoutCleanerAccess(manual), true);
+  assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...manual, propertyId: "ordinary-property" }), false);
+  assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...manual, checkOut: new Date("2026-10-30T15:00:00Z") }), false);
+  assert.equal(isHistoricalDemoWithoutCleanerAccess({ ...manual, assignments: [{ role: "CLEANING", status: "ACTIVE" }] }), false);
 });
