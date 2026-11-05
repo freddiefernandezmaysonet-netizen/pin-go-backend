@@ -469,12 +469,13 @@ export function buildGuestReservationEmail(
           <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:20px 0;color:#1e3a8a;">
             <h3 style="margin:0 0 8px;">Pin&amp;Go Guest</h3>
             <p>${isSpanish
-              ? "Lleva tu reservación en tu teléfono. La app es opcional; su descarga pública para iPhone y Android estará disponible al completarse la aprobación en App Store y Google Play. Mientras tanto, puedes continuar en el navegador desde los enlaces seguros de este correo."
-              : "Keep your reservation on your phone. The app is optional; public downloads for iPhone and Android will be available once App Store and Google Play approval is complete. Meanwhile, you can continue in your browser using this email’s secure links."}</p>
+              ? "Lleva tu reservación en tu teléfono. Descarga Pin&Go Guest para iPhone. La app es opcional; también puedes continuar en el navegador desde los enlaces seguros de este correo."
+              : "Keep your reservation on your phone. Download Pin&Go Guest for iPhone. The app is optional; you can also continue in your browser using this email’s secure links."}</p>
+            <p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#1d4ed8;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">${isSpanish ? "Descargar para iPhone" : "Download for iPhone"}</a></p>
             <ol style="padding-left:22px;">
               <li>${isSpanish
-                ? "Cuando esté publicada, descarga Pin&Go Guest desde App Store (iPhone) o Google Play (Android). Si ya está instalada, continúa."
-                : "Once published, download Pin&Go Guest from the App Store (iPhone) or Google Play (Android). If already installed, continue."}</li>
+                ? "Instala Pin&Go Guest antes de vincular tu reservación. Si ya está instalada, continúa."
+                : "Install Pin&Go Guest before linking your reservation. If already installed, continue."}</li>
               <li>${isSpanish
                 ? "En ese mismo teléfono, abre el enlace de registro o acceso de tu reservación y selecciona Usar Pin&Go Guest. Solicita el código de verificación que recibirás en el correo de tu reservación y confirma el dispositivo. No es el PIN de la puerta."
                 : "On that same phone, open your reservation’s registration or access link and select Use Pin&Go Guest. Request the verification code sent to your reservation email and confirm the device. This is not your door PIN."}</li>
