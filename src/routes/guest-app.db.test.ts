@@ -53,9 +53,11 @@ test("portal native-link contract with no phone or SMS, real Prisma and session 
     assert.match(html, new RegExp(`href="/guest/verify/${token}"`));
 
     const storeLink = '<a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer">';
+    const androidStoreLink = '<a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer">';
     assert.ok(html.includes(storeLink));
-    // Only the public store link may leave the portal; no private token or redirect.
-    assert.doesNotMatch(html.replace(storeLink, ""), /<script|http-equiv="refresh"|https?:\/\//);
+    assert.ok(html.includes(androidStoreLink));
+    // Only the public store links may leave the portal; no private token or redirect.
+    assert.doesNotMatch(html.replace(storeLink, "").replace(androidStoreLink, ""), /<script|http-equiv="refresh"|https?:\/\//);
     const cookie = response.headers.get("set-cookie")!.split(";")[0]!;
     const csrf = html.match(/name="csrf" value="([^"]+)"/)![1]!;
     const post = (action: string, body: Record<string, string>) => fetch(`${base}/guest/app/${token}/${action}`, {
