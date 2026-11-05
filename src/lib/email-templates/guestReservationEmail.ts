@@ -469,9 +469,10 @@ export function buildGuestReservationEmail(
           <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:20px 0;color:#1e3a8a;">
             <h3 style="margin:0 0 8px;">Pin&amp;Go Guest</h3>
             <p>${isSpanish
-              ? "Lleva tu reservación en tu teléfono. Descarga Pin&Go Guest para iPhone. La app es opcional; también puedes continuar en el navegador desde los enlaces seguros de este correo."
-              : "Keep your reservation on your phone. Download Pin&Go Guest for iPhone. The app is optional; you can also continue in your browser using this email’s secure links."}</p>
+              ? "Lleva tu reservación en tu teléfono. Descarga Pin&Go Guest para iPhone o Android. La app es opcional; también puedes continuar en el navegador desde los enlaces seguros de este correo."
+              : "Keep your reservation on your phone. Download Pin&Go Guest for iPhone or Android. The app is optional; you can also continue in your browser using this email’s secure links."}</p>
             <p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#1d4ed8;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">${isSpanish ? "Descargar para iPhone" : "Download for iPhone"}</a></p>
+<p><a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#1d4ed8;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">${isSpanish ? "Descargar para Android" : "Download for Android"}</a></p>
             <ol style="padding-left:22px;">
               <li>${isSpanish
                 ? "Instala Pin&Go Guest antes de vincular tu reservación. Si ya está instalada, continúa."
