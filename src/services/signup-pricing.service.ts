@@ -26,6 +26,7 @@ export function assertMonthlyPrice(price: any, amount: number, interval: 'month'
 }
 
 export function haasPriceIds(env: Record<string, string | undefined> = process.env) {
-  return Object.keys(haasMonthlyAmounts).flatMap(model => [12,24].map(term => env[`STRIPE_PRICE_HAAS_${model.toUpperCase()}_${term}_MONTHLY`]))
+  return [...Object.keys(haasMonthlyAmounts).flatMap(model => [12,24].map(term => env[`STRIPE_PRICE_HAAS_${model.toUpperCase()}_${term}_MONTHLY`])),
+    ...(env.STRIPE_PRICE_HAAS_LEGACY_IDS ?? "").split(",")]
     .filter((id): id is string => Boolean(id?.trim())).map(id => id.trim());
 }
