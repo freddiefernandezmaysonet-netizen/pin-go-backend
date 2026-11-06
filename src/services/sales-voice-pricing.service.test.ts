@@ -18,7 +18,7 @@ test("fresh reads reflect configuration on each call and omit raw provider data"
   assert.ok(Object.isFrozen(first)&&Object.isFrozen(first.lines));
 });
 test("all eight configured offers use checkout-compatible units and terms",async()=>{
-  const amounts=[3999,39990,5499,4499,7499,6499,8499,7499];
+  const amounts=[3999,39990,5999,4999,7999,6999,8999,7999];
   const keys=["PLATFORM_MONTHLY","PLATFORM_YEARLY","HAAS_ESSENTIAL_12_MONTHLY","HAAS_ESSENTIAL_24_MONTHLY",
     "HAAS_PRO_12_MONTHLY","HAAS_PRO_24_MONTHLY","HAAS_ELITE_12_MONTHLY","HAAS_ELITE_24_MONTHLY"];
   const config=Object.fromEntries(keys.map((k,i)=>["STRIPE_PRICE_"+k,"price_"+i]));

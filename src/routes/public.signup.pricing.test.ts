@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import expr
 process.env.STRIPE_SECRET_KEY ??= 'sk_test_fixture_not_a_real_key';
 const {default:router,signupCheckoutDb:db}=await import('./public.signup.routes.js');
 const {default:stripe}=await import('../billing/stripe.js');
-const amounts={essential:{12:5499,24:4499},pro:{12:7499,24:6499},elite:{12:8499,24:7499}};
+const amounts={essential:{12:5999,24:4999},pro:{12:7999,24:6999},elite:{12:8999,24:7999}};
 test('signup checkout charges each package once monthly and retains model/term throughout payment metadata',async()=>{
  const original={find:db.dashboardUser.findUnique,create:db.pendingSignup.create,update:db.pendingSignup.update,customer:stripe.customers.create,session:stripe.checkout.sessions.create,price:stripe.prices.retrieve};
  let expectedInterval='month',expectedAmount=0,expectedId='',pending:any,session:any,customer:any;

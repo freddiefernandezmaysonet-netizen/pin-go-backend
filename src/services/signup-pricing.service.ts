@@ -1,7 +1,7 @@
 export const haasMonthlyAmounts = {
-  essential: { 12: 5499, 24: 4499 },
-  pro: { 12: 7499, 24: 6499 },
-  elite: { 12: 8499, 24: 7499 },
+  essential: { 12: 5999, 24: 4999 },
+  pro: { 12: 7999, 24: 6999 },
+  elite: { 12: 8999, 24: 7999 },
 } as const;
 
 export function resolveHaasPrice(selection: any, locks: number, interval: string, env: Record<string, string | undefined> = process.env) {
