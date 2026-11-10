@@ -5,6 +5,7 @@ on:
       - 'src/services/guest-registration-channel*'
       - 'src/services/guest-language-ingest*'
       - 'src/services/ingest.service.ts'
+      - 'src/services/ota-masked-booking*'
       - 'src/services/checkoutSms*'
       - 'src/services/checkout-sms-consent.policy.ts'
       - 'src/services/precheckin-email-fallback.contract.test.ts'
@@ -57,3 +58,4 @@ jobs:
           src/services/precheckin-email-fallback.contract.test.ts
           src/services/ota-guest-contact-automation-closure.contract.test.ts
           src/services/guest-language-ingest.policy.test.ts
+          src/services/ota-masked-booking.policy.test.ts
