@@ -18,6 +18,16 @@ Pre-arrival reservation changes evaluate current discounts for the proposed stay
 
 ## Release sequence and remaining validation
 
-Apply the migration before deploying backend, then deploy the companion Dashboard. Keep discounts disabled until a staging property passes save/reload, preview/quote/checkout equivalence, paid webhook/replay, cancellation and modification checks against PostgreSQL and a Stripe sandbox. Database persistence and subtotal integration are now validated locally; an actual Stripe sandbox checkout and paid webhook/replay remain outstanding. The connected Stripe account is live-only, so no real charge was attempted. Browser visual inspection remains outstanding because local Chromium could not open its process socket; DOM interactions were tested with jsdom.
+Apply the migration before deploying backend, then deploy the companion Dashboard. Keep discounts disabled until a staging property passes save/reload, preview/quote/checkout equivalence, paid webhook/replay, cancellation and modification checks against PostgreSQL and a Stripe sandbox. Database persistence and subtotal integration passed. An actual Stripe test Checkout, signed webhook delivery, reservation persistence and fulfillment replay passed on 2026-11-11 in the isolated Railway certification service. No live charge was attempted. Browser visual inspection remains outstanding because local Chromium could not open its process socket; DOM interactions were tested with jsdom.
 
 Prime and coupon discount stacking is NOT wired: the current main branch does not have those discount engines. No nonfunctional controls are shown for them. This change implements the two agreed configurable automatic direct-booking discounts. No production property or OTA configuration was modified.
+
+## Stripe certification evidence — 2026-11-11
+
+- Harness commit: `cd3ea63473fbaa78e8380f7783a986775932a852` on `codex/direct-discounts-stripe-certification`; test-only service guard, test-key guard, synthetic host guard, isolated PostgreSQL schema, no external messaging/access credentials.
+- Railway service `4cfd2dfd-3664-4bc6-b5cf-7ca765092f7a`, deployment `7b9d89cc-eefd-42d1-8f0b-f93b4fdc1ab0`, project PinGo Stay-Time Certification / certification.
+- Session `cs_test_a0eQivwqpt82g5pVsgMAEVvviDgt7TeP1M9WpaymStlcyDCPujsD61oEM7`; signed Stripe event `evt_1UahRLRqmXnirYx7pWI6Gi7g`.
+- Seven nights at $100: original accommodation $700; sequential 10% + 5% discount $101.50; net accommodation $598.50; cleaning $75; amenity $25; test tax $48.90; paid total $747.40.
+- Rules were disabled after Checkout creation and before payment. Fulfillment retained the original discount snapshot. The actual production fulfillment function was invoked again with the paid session: reservation count stayed one. Reservation `cmwcj28o4000cmz1b4xssjhno`, test number `PG-2026-000001`.
+- Harness logged `CERTIFIED` and `STOPPED failed=false`; its temporary webhook was removed. It shut down before the browser return finished, so the return page displayed Railway's application-not-responding page. This is not a passing visual success-page test.
+- Scope excludes real guest/host emails, locks, cleaning notifications and OTA distribution; corresponding fixture audit warnings were expected because those integrations were deliberately absent. The feature is still unmerged and not deployed to production.
