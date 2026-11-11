@@ -1,0 +1,62 @@
+name: Direct Booking Discounts PostgreSQL
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/direct-booking-discount*'
+      - 'src/services/direct-booking-pricing-snapshot*'
+      - 'src/routes/dashboard.direct-discounts*'
+      - 'src/routes/public-booking.routes.ts'
+      - 'src/services/direct-booking.service.ts'
+      - 'src/services/cancellation-policy.service.ts'
+      - 'src/services/guest-reservation-*'
+      - 'prisma/**'
+      - '.github/workflows/direct-booking-discounts.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discounts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: pingo_discounts_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U postgres -d pingo_discounts_test'
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/pingo_discounts_test
+      DIRECT_DISCOUNTS_DB_TEST: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate client and prepare pre-discount schema
+        run: |
+          npx prisma generate
+          python3 - <<'PY'
+          import pathlib, re
+          target = pathlib.Path('/tmp/pingo-discounts-baseline')
+          target.mkdir()
+          for path in pathlib.Path('prisma').glob('*.prisma'):
+              text = path.read_text()
+              if path.name == 'schema.prisma':
+                  text = re.sub(r'^\s*directDiscountConfig DirectBookingDiscountConfig\?\s*$', '', text, flags=re.M)
+                  text = re.sub(r'^\s*directPricingSnapshots DirectBookingPricingSnapshot\[\]\s*$', '', text, flags=re.M)
+                  text = re.sub(r'\nmodel DirectBooking(?:DiscountConfig|PricingSnapshot) \{.*?\n\}', '', text, flags=re.S)
+              (target / path.name).write_text(text)
+          PY
+          npx prisma db push --schema /tmp/pingo-discounts-baseline --skip-generate
+      - name: Execute exact migration on disposable PostgreSQL
+        run: npx prisma db execute --file prisma/migrations/20261111170000_direct_booking_discounts/migration.sql --schema prisma
+      - name: Certify pricing, permissions, persistence and reservation regressions
+        run: npm run test:direct-booking-discounts

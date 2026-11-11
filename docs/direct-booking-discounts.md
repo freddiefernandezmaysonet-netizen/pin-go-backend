@@ -11,12 +11,13 @@ Pre-arrival reservation changes evaluate current discounts for the proposed stay
 ## Verification
 
 - `npm run test:direct-booking-discounts`: 79 passing tests (including existing modification and extension regressions).
-- Prisma schema generation and validation pass. Migration is additive, but has NOT been applied to a database in this change.
+- Prisma schema generation and validation pass. The exact additive migration was executed successfully against disposable local PostgreSQL 16, initialized from the pre-discount schema. No production migration was run.
+- Seven native PostgreSQL tests pass: default disabled configuration, unsaved preview without persistence, save/reload and tenant isolation, discounts with dynamic pricing off/on, concurrent version conflicts, and preservation of pricing evidence after configuration changes. The new Direct Booking Discounts PostgreSQL workflow reproduces this with a fresh database.
 - Targeted typecheck passes with `npx tsc -p tsconfig.direct-booking-discounts.json --exactOptionalPropertyTypes false`. With the repository's strict optional-property setting, four existing errors occur in auth/session-request-guard.ts and middleware/requireAuth.ts. The full repository typecheck exhausts the local Node heap; it is not a passing check.
 - Companion Dashboard build, component typecheck, lint and DOM interaction test pass.
 
 ## Release sequence and remaining validation
 
-Apply the migration before deploying backend, then deploy the companion Dashboard. Keep discounts disabled until a staging property passes save/reload, preview/quote/checkout equivalence, paid webhook/replay, cancellation and modification checks against PostgreSQL and a Stripe sandbox. These live integrations have not been exercised here. Browser visual inspection remains outstanding because local Chromium could not open its process socket; DOM interactions were tested with jsdom.
+Apply the migration before deploying backend, then deploy the companion Dashboard. Keep discounts disabled until a staging property passes save/reload, preview/quote/checkout equivalence, paid webhook/replay, cancellation and modification checks against PostgreSQL and a Stripe sandbox. Database persistence and subtotal integration are now validated locally; an actual Stripe sandbox checkout and paid webhook/replay remain outstanding. The connected Stripe account is live-only, so no real charge was attempted. Browser visual inspection remains outstanding because local Chromium could not open its process socket; DOM interactions were tested with jsdom.
 
 Prime and coupon discount stacking is NOT wired: the current main branch does not have those discount engines. No nonfunctional controls are shown for them. This change implements the two agreed configurable automatic direct-booking discounts. No production property or OTA configuration was modified.
