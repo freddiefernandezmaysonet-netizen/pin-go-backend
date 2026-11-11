@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"], "noEmit": true, "module": "ESNext", "moduleResolution": "Bundler" },
+  "include": ["src/services/direct-booking-discounts.policy.ts", "src/services/direct-booking-discounts.policy.test.ts", "src/services/direct-booking-discounted-quote.service.ts", "src/routes/dashboard.direct-discounts.routes.ts"]
+}

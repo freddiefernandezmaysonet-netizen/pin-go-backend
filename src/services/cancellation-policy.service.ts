@@ -167,6 +167,7 @@ function getPricingComponents({
   );
 
   const nightlySubtotalFromBreakdown = readFirstNumber(breakdown, [
+    "accommodationSubtotalAfterDiscount",
     "nightlySubtotal",
     "nightlyTotal",
     "nightlyRatesTotal",
