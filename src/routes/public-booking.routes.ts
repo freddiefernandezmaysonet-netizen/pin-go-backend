@@ -1,3 +1,4 @@
+import { calculateDiscountedDirectQuote } from "../services/direct-booking-discounted-quote.service";
 import { buildCheckoutStatusRouter } from "./public-booking.checkout-status.routes.js";
 import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
@@ -1472,7 +1473,7 @@ publicBookingRouter.post("/quote", async (req, res) => {
       });
     }
 
-    const pricing = await calculateDirectBookingPricing({
+    const pricing = await calculateDiscountedDirectQuote({
       propertyId: property.id,
       checkIn: stayDates.checkIn,
       checkOut: stayDates.checkOut,
@@ -1751,13 +1752,20 @@ const cleanSelectedAmenityIds = Array.isArray(selectedAmenityIds)
   ? selectedAmenityIds.map((id) => String(id)).filter(Boolean)
   : [];
 
-const pricing = await calculateDirectBookingPricing({
+const pricing = await calculateDiscountedDirectQuote({
   propertyId: property.id,
   checkIn: stayDates.checkIn,
   checkOut: stayDates.checkOut,
   selectedAmenityIds: cleanSelectedAmenityIds,
 });
 
+if (req.body?.expectedTotalAmountCents !== undefined &&
+  req.body.expectedTotalAmountCents !== pricing.totalAmountCents) {
+  return res.status(409).json({ ok: false, error: "QUOTE_CHANGED",
+    message: normalizedPreferredLanguage === "es"
+      ? "El precio cambió. Actualiza la cotización antes de pagar."
+      : "The price changed. Refresh your quote before paying." });
+}
 const totalAmount = pricing.totalAmount;
 const totalAmountCents = pricing.totalAmountCents;
 
@@ -1878,6 +1886,10 @@ const guestAcceptedSecurePreCheckinRequirementText =
 
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 
+    const pricingSnapshot = await prisma.directBookingPricingSnapshot.create({ data: {
+      propertyId: property.id, checkIn: stayDates.checkIn, checkOut: stayDates.checkOut,
+      pricing: JSON.parse(JSON.stringify(pricing)),
+    } });
     const session = await stripe.checkout.sessions.create({
   mode: "payment",
   locale: normalizedPreferredLanguage,
@@ -1938,7 +1950,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
         adults: String(adultsCount),
         children: String(childrenCount),
         nights: String(nights),
-        nightlyRate: String(pricing.nightlyRate),
+        pricingSnapshotId: pricingSnapshot.id,
         cleaningFee: String(pricing.cleaningFee),
         amenitiesTotal: String(pricing.amenitiesTotal),
         selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),

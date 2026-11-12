@@ -536,3 +536,17 @@ for (const failure of ["availability", "snapshot", "canary"] as const) {
     assert.equal(calls.pricing.length, 0);
   });
 }
+
+
+test("extension preserves original accommodation discount and charges only added nights", async () => {
+  const { input, dependencies, reservation } = fixture();
+  const base = reservation.pricingBreakdown as typeof reservation.pricingBreakdown & { accommodationDiscountTotal: number; accommodationSubtotalAfterDiscount: number };
+  base.accommodationDiscountTotal = 50;
+  base.accommodationSubtotalAfterDiscount = 200;
+  base.totalAmount = 285; base.totalAmountCents = 28500; reservation.totalAmount = 285;
+  const result = await getGuestReservationModificationPreview(input, dependencies);
+  assert.equal(result.pricing.amountDifferenceCents, 12100);
+  assert.equal(result.pricing.proposed.totalAmountCents, 40600);
+  assert.equal((result.pricing.proposed as any).accommodationDiscountTotal, 50);
+  assert.equal((result.pricing.proposed as any).accommodationSubtotalAfterDiscount, 300);
+});

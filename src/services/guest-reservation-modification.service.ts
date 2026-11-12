@@ -1,3 +1,4 @@
+import { calculateDiscountedDirectQuote } from "./direct-booking-discounted-quote.service";
 import { hasDemoMarker } from "./internal-demo-scope.js";
 import { createHash } from "node:crypto";
 import {
@@ -28,7 +29,7 @@ type PreviewDependencies = {
 };
 const defaultPreviewDependencies: PreviewDependencies = {
   client: prisma, now: () => new Date(), env: process.env,
-  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDirectBookingPricing,
+  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDiscountedDirectQuote,
 };
 
 type ConfirmationDependencies = PreviewDependencies & {
@@ -466,6 +467,13 @@ function serializePublicPricing(pricing: any) {
         }))
       : [],
     nightlySubtotal: pricing.nightlySubtotal,
+    ...(pricing.accommodationDiscountTotal !== undefined ? {
+      accommodationSubtotalBeforeDiscount: pricing.accommodationSubtotalBeforeDiscount ?? pricing.nightlySubtotal,
+      accommodationDiscountTotal: pricing.accommodationDiscountTotal,
+      accommodationSubtotalAfterDiscount: pricing.accommodationSubtotalAfterDiscount,
+      discounts: pricing.discounts ?? [],
+      discountPolicySnapshot: pricing.discountPolicySnapshot ?? null,
+    } : {}),
     cleaningFee: pricing.cleaningFee,
     amenities: pricing.amenities,
     chargedAmenities: pricing.chargedAmenities,
