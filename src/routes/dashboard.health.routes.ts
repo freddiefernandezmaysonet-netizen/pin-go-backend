@@ -203,6 +203,98 @@ export function buildDashboardHealthRouter(prisma: PrismaClient) {
     }
   });
 
+  router.get("/gateways", async (req, res) => {
+    try {
+      const orgId = getOrgId(req);
+
+      if (!orgId) {
+        return res.status(401).json({
+          ok: false,
+          error: "Unauthorized",
+        });
+      }
+
+      const gateways = await prisma.ttlockGateway.findMany({
+        where: {
+          organizationId: orgId,
+        },
+        select: {
+          id: true,
+          ttlockGatewayId: true,
+          gatewayMac: true,
+          gatewayName: true,
+          gatewayVersion: true,
+          networkName: true,
+          isOnline: true,
+          lastEventAt: true,
+          lastOnlineAt: true,
+          lastOfflineAt: true,
+          source: true,
+          updatedAt: true,
+          locks: {
+            where: {
+              isActive: true,
+              property: {
+                organizationId: orgId,
+              },
+            },
+            select: {
+              id: true,
+              ttlockLockId: true,
+              ttlockLockName: true,
+              locationLabel: true,
+              property: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: [
+          { isOnline: "asc" },
+          { updatedAt: "desc" },
+        ],
+      });
+
+      return res.json({
+        ok: true,
+        items: gateways.map((gateway) => ({
+          id: gateway.id,
+          ttlockGatewayId: gateway.ttlockGatewayId,
+          gatewayMac: gateway.gatewayMac,
+          gatewayName: gateway.gatewayName,
+          gatewayVersion: gateway.gatewayVersion,
+          networkName: gateway.networkName,
+          isOnline: gateway.isOnline,
+          lastEventAt: gateway.lastEventAt,
+          lastOnlineAt: gateway.lastOnlineAt,
+          lastOfflineAt: gateway.lastOfflineAt,
+          source: gateway.source,
+          mappedLockCount: gateway.locks.length,
+          locks: gateway.locks.map((lock) => ({
+            id: lock.id,
+            ttlockLockId: lock.ttlockLockId,
+            name:
+              lock.ttlockLockName ??
+              lock.locationLabel ??
+              `Lock ${lock.ttlockLockId}`,
+            property: lock.property,
+          })),
+          updatedAt: gateway.updatedAt,
+        })),
+      });
+    } catch (err) {
+      console.error("health gateways error", err);
+
+      return res.status(500).json({
+        ok: false,
+        error: "Failed to load gateway health",
+      });
+    }
+  });
+
   router.get("/locks", async (req, res) => {
     try {
       const orgId = getOrgId(req);
