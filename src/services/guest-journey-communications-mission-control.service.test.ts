@@ -57,6 +57,34 @@ function fakePrisma(input: {
 
 const scope = { organizationId: "org-1", propertyId: "property-1" };
 
+test("uncertain delivery creates host-visible attention without any external effect", async () => {
+  const f = fakePrisma({ status: GuestJourneyCoordinationIntentStatus.WAITING_FOR_EVIDENCE });
+  const result = await syncGuestJourneyCommunicationMissionControl(f.prisma, "intent-1", scope, f.dependencies as any);
+  assert.equal(result.externalSideEffects, 0);
+  assert.equal(f.upserts[0].visibility, "HOST");
+  assert.equal(f.upserts[0].workflowState, "ACTION_REQUIRED");
+  assert.equal(f.upserts[0].issueCode, "GUEST_JOURNEY_COMMUNICATIONS_OUTCOME_UNKNOWN");
+});
+
+test("non-terminal retry states cannot clear an existing escalation", async () => {
+  for (const status of [GuestJourneyCoordinationIntentStatus.PENDING, GuestJourneyCoordinationIntentStatus.RETRYABLE, GuestJourneyCoordinationIntentStatus.CLAIMED]) {
+    const f = fakePrisma({ status, existing: { workflowState: "ACTION_REQUIRED", lastSignalAt: now, firstDetectedAt: now } });
+    await syncGuestJourneyCommunicationMissionControl(f.prisma, "intent-1", scope, f.dependencies as any);
+    assert.equal(f.upserts.length, 0);
+  }
+});
+
+test("receipt recovery preserves the host visibility of the resolved issue", async () => {
+  const f = fakePrisma({ status: GuestJourneyCoordinationIntentStatus.SUCCEEDED, existing: {
+    workflowState: "ACTION_REQUIRED", firstDetectedAt: now, lastSignalAt: now,
+    visibility: "HOST", issueCode: "GUEST_JOURNEY_COMMUNICATIONS_OUTCOME_UNKNOWN",
+  } });
+  await syncGuestJourneyCommunicationMissionControl(f.prisma, "intent-1", scope, f.dependencies as any);
+  assert.equal(f.upserts[0].workflowState, "RESOLVED");
+  assert.equal(f.upserts[0].visibility, "HOST");
+  assert.equal(f.upserts[0].issueCode, "GUEST_JOURNEY_COMMUNICATIONS_OUTCOME_UNKNOWN");
+});
+
 test("exhausted communications create developer-only ACTION_REQUIRED evidence", async () => {
   const fixture = fakePrisma({ status: GuestJourneyCoordinationIntentStatus.EXHAUSTED });
   const result = await syncGuestJourneyCommunicationMissionControl(
