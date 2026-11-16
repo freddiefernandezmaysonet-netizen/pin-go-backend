@@ -1,3 +1,4 @@
+import { paidBookingAttribution } from "./direct-booking-attribution.js";
 import { validatePaidPricingSnapshot } from "./direct-booking-pricing-snapshot.policy";
 import { captureDirectPinAIFee } from "../pin-ai/hybrid-fee-evidence.service.js";
 import Stripe from "stripe";
@@ -970,6 +971,7 @@ const ingestResult = await ingestReservation({
   externalUpdatedAt: new Date().toISOString(),
   externalRaw: {
     stripeCheckoutSessionId: session.id,
+    bookingAttribution: paidBookingAttribution(session.metadata?.bookingCampaign),
     stripePaymentIntentId: paymentIntentId,
     amountTotal: session.amount_total,
     currency: session.currency,
