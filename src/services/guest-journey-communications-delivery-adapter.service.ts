@@ -1,3 +1,4 @@
+import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
@@ -149,6 +150,7 @@ async function defaultSendEmail(input: {
         select: { complexName: true, unitNumber: true },
       });
       return sendGuestPreCheckinEmail({
+        directBookingUrl: await resolvePrecheckinDirectBookingUrl(input.prisma, input.reservationId),
         arrivalLocation: formatPropertyArrivalLocation(arrivalProperty ?? {}, clean(payload.preferredLanguage)),
         to: input.to,
         replyTo: replyTo.email,
