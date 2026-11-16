@@ -59,6 +59,7 @@ export type SendGuestContactRecoveryHostNoticeInput = {
 };
 
 export type SendGuestPreCheckinEmailInput = {
+  directBookingUrl?: string | null;
   arrivalLocation?: string | null;
   to: string;
   replyTo?: string | null;
@@ -2205,6 +2206,7 @@ export async function sendGuestPreCheckinEmail(
     language
   );
 
+  const safeDirectBookingUrl = input.directBookingUrl ? getSafeUrl(input.directBookingUrl) : null;
   const safeMapsLink = input.mapsLink ? getSafeUrl(input.mapsLink) : null;
   const safeVerificationUrl = input.verificationUrl
     ? getSafeUrl(input.verificationUrl)
@@ -2295,6 +2297,15 @@ export async function sendGuestPreCheckinEmail(
             ? "Este correo contiene información de llegada. El acceso se envía por separado cuando todos los requisitos aplicables estén completos."
             : "This email contains arrival information. Access is sent separately once all applicable requirements are complete."}
         </p>
+
+        ${safeDirectBookingUrl ? `
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:16px;margin:24px 0;">
+          <p style="margin:0 0 8px;font-weight:800;">${isSpanish ? "Tu próxima escapada empieza aquí" : "Your next getaway starts here"}</p>
+          <p style="margin:0 0 14px;">${isSpanish
+            ? "Guarda el enlace de esta propiedad para consultar disponibilidad y reservar directamente tu próxima estadía con nosotros."
+            : "Save this property's link to check availability and book your next stay directly with us."}</p>
+          <a href="${escapeHtml(safeDirectBookingUrl)}" style="display:inline-block;background:#1d4ed8;color:#ffffff;text-decoration:none;padding:11px 15px;border-radius:9px;font-weight:800;">${isSpanish ? "Reservar mi próxima estadía" : "Book my next stay"}</a>
+        </div>` : ""}
 
         <p>Pin&Go</p>
       </div>

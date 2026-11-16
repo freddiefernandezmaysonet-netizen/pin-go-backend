@@ -1,3 +1,4 @@
+import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
@@ -357,6 +358,7 @@ export async function sendPreCheckinEmail(
           : null;
 
       return sendGuestPreCheckinEmail({
+        directBookingUrl: await resolvePrecheckinDirectBookingUrl(prisma, r.id),
         to: r.guestEmail!,
         replyTo: replyTo?.email ?? null,
         reservationNumber,
