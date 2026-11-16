@@ -1,0 +1,23 @@
+name: Precheckin campaign metrics
+on:
+  pull_request:
+    paths:
+      - 'src/services/precheckin-campaign-metrics*'
+      - 'src/routes/dashboard.metrics.route.ts'
+      - '.github/workflows/precheckin-campaign-metrics.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: node --import tsx --test src/services/precheckin-campaign-metrics.service.test.ts
+      - run: npx tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext src/services/precheckin-campaign-metrics.service.ts src/services/precheckin-campaign-metrics.service.test.ts
