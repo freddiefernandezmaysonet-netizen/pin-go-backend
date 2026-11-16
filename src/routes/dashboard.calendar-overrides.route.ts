@@ -1,3 +1,4 @@
+import { registerNightlyRateRemoval } from "./dashboard.nightly-rate-removal.route";
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 
@@ -425,5 +426,6 @@ router.put(
 );
 
 registerCalendarOverrideRemoval(router, prisma);
+registerNightlyRateRemoval(router, prisma);
 return router;
 }
