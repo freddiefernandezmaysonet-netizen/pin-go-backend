@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'src/routes/dashboard.calendar-overrides*.ts'
+      - 'src/routes/dashboard.nightly-rate-removal*.ts'
       - '.github/workflows/stay-restrictions-removal.yml'
 permissions:
   contents: read
@@ -35,6 +36,7 @@ jobs:
         run: >-
           node --import tsx --test
           src/routes/dashboard.calendar-overrides-removal.route.test.ts
+          src/routes/dashboard.nightly-rate-removal.route.test.ts
           src/routes/dashboard.calendar-overrides.route.test.ts
           src/pms/outbound/channex-ari-outbox.service.test.ts
           src/pms/outbound/channex-ari-snapshot.service.test.ts
@@ -47,3 +49,4 @@ jobs:
           src/routes/dashboard.calendar-overrides-removal.route.ts
           src/routes/dashboard.calendar-overrides.route.ts
           src/routes/dashboard.calendar-overrides-removal.route.test.ts
+          src/routes/dashboard.nightly-rate-removal.route.test.ts
