@@ -40,7 +40,7 @@ test("precheckin renders bilingual optional CTA after arrival instructions witho
       assert.ok(html.includes("&amp;utm_source=pingo"));
       assert.ok(html.indexOf(label) > html.indexOf(preferredLanguage === "es" ? "Este correo contiene" : "This email contains"));
     }
-    for (const directBookingUrl of [undefined, "javascript:alert(1)"]) {
+    for (const directBookingUrl of [null, "javascript:alert(1)"]) {
       await sendGuestPreCheckinEmail({ ...base, directBookingUrl });
       assert.ok(!bodies.at(-1).html.includes("Book my next stay"));
     }

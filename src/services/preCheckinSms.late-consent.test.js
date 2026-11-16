@@ -1,3 +1,4 @@
+import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -55,6 +56,7 @@ function fixture(rows, options = {}) {
     messageLog: { create: async ({ data }) => { messages.push(data); return data; } },
   };
   const service = load(serviceSource, {
+    "./precheckin-direct-booking-link.service.js": { resolvePrecheckinDirectBookingUrl },
     "./property-arrival-location.js": { formatPropertyArrivalLocation: () => null },
     "./guest-registration-channel.policy": { isChannexGuestRegistrationExempt: r => r.externalProvider === "CHANNEX" && Boolean(r.externalId) },
     "../channex-messaging/ota-operational-guest.service.js": { deliverOtaOperationalCommunication: async () => options.otaResult ?? null },
