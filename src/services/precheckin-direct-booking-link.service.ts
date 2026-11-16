@@ -15,8 +15,13 @@ export async function resolvePrecheckinDirectBookingUrl(
         } },
       },
     });
-    if (!reservation || !["DIRECT_BOOKING", "MANUAL"].includes(reservation.source ?? "")
-      || reservation.externalProvider || reservation.externalId) return null;
+    if (!reservation || !["DIRECT_BOOKING", "MANUAL"].includes(reservation.source ?? "")) return null;
+    // Native reservations also have external IDs (Stripe session/manual ingest IDs).
+    // Only the matching Pin&Go provider may carry one; unknown/OTA origins stay excluded.
+    const nativeProvider = reservation.source === "DIRECT_BOOKING" ? "PIN_GO_DIRECT" : "PIN_GO_MANUAL";
+    if (reservation.externalProvider
+      ? reservation.externalProvider !== nativeProvider
+      : Boolean(reservation.externalId)) return null;
     const property = reservation.property;
     const organization = property?.organization;
     if (property?.status !== "ACTIVE" || !property.isPublicBookable || property.isTestProperty

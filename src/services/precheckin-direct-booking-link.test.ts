@@ -12,7 +12,14 @@ test("return-stay link uses current property eligibility and excludes external r
   assert.equal(url.searchParams.get("utm_campaign"), "precheckin_return_stay");
   assert.equal(url.searchParams.get("lang"), "es");
   assert.ok(await resolvePrecheckinDirectBookingUrl(db({ ...r, source: "MANUAL" }), "r"));
-  for (const value of [null, { ...r, source: "AIRBNB" }, { ...r, externalProvider: "CHANNEX" },
+  for (const [source, externalProvider, externalId] of [
+    ["DIRECT_BOOKING", "PIN_GO_DIRECT", "cs_test_paid"],
+    ["MANUAL", "PIN_GO_MANUAL", "manual-reservation"],
+  ]) {
+    assert.ok(await resolvePrecheckinDirectBookingUrl(db({ ...r, source, externalProvider, externalId }), "r"));
+  }
+  for (const value of [null, { ...r, source: "MANUAL", externalProvider: "PIN_GO_DIRECT" },
+    { ...r, externalProvider: "PIN_GO_MANUAL" }, { ...r, source: "AIRBNB" }, { ...r, externalProvider: "CHANNEX" },
     { ...r, externalId: "ota-1" }, ...[{ isPublicBookable: false }, { isTestProperty: true },
     { status: "INACTIVE" }, { slug: null }, { organization: { publicBookingEnabled: false, slug: "host" } }]
       .map(p => ({ ...r, property: { ...r.property, ...p } }))]) {
