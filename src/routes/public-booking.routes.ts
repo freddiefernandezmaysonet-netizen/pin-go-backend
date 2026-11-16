@@ -1,3 +1,4 @@
+import { bookingCampaignMetadata } from "../services/direct-booking-attribution.js";
 import { calculateDiscountedDirectQuote } from "../services/direct-booking-discounted-quote.service";
 import { buildCheckoutStatusRouter } from "./public-booking.checkout-status.routes.js";
 import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
@@ -1986,7 +1987,8 @@ const guestAcceptedSecurePreCheckinRequirementText =
           refundPercentBeforeDeadline: String(cancellationPolicySnapshot.refundPercentBeforeDeadline),
           refundPercentAfterDeadline: String(cancellationPolicySnapshot.refundPercentAfterDeadline),
         }),
-        freeCancellationHoursBeforeCheckIn: String(
+        ...bookingCampaignMetadata(
+          req.body?.bookingCampaign,
           cancellationPolicySnapshot.freeCancellationHoursBeforeCheckIn
         ),
       },
