@@ -9,6 +9,7 @@ on:
       - "src/services/email-delivery.service.ts"
       - "src/services/messaging.service.ts"
       - "src/services/preCheckinSms.service.ts"
+      - "src/services/precheckin-direct-booking-link*"
       - "src/services/preCheckinSms.late-consent.test.js"
       - "src/services/checkoutSms.service.ts"
       - "src/services/guest-verification-reminder.service.ts"
@@ -41,6 +42,7 @@ jobs:
           src/services/guest-journey-access-communications-bridge.policy.test.ts
           src/services/precheckin-email-fallback.contract.test.ts
           src/services/preCheckinSms.late-consent.test.js
+          src/services/precheckin-direct-booking-link.test.ts
       - name: Provider delivery regressions
         run: >-
           node --import tsx --test
