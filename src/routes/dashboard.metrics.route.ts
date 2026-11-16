@@ -1,3 +1,4 @@
+import { getPrecheckinCampaignMetrics } from "../services/precheckin-campaign-metrics.service.js";
 import { Router } from "express";
 import { PrismaClient, ReservationStatus } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
@@ -91,4 +92,16 @@ dashboardMetricsRouter.get("/api/dashboard/metrics", requireAuth, async (req, re
     properties,
     updatedAt: new Date().toISOString(),
   });
+});
+
+dashboardMetricsRouter.get("/api/dashboard/metrics/precheckin-campaign", requireAuth, async (req, res) => {
+  const organizationId = (req as any).user?.orgId;
+  if (typeof organizationId !== "string" || !organizationId.trim()) {
+    return res.status(403).json({ error: "ORGANIZATION_REQUIRED" });
+  }
+  try {
+    return res.json(await getPrecheckinCampaignMetrics(prisma, organizationId));
+  } catch {
+    return res.status(503).json({ error: "CAMPAIGN_METRICS_UNAVAILABLE" });
+  }
 });
