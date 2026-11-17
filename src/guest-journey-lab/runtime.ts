@@ -1,0 +1,183 @@
+import { PrismaClient, Prisma } from "@prisma/client";
+import { materializeGuestJourneyCoordinationIntents } from "../services/guest-journey-coordination-intent.service";
+import { runGuestJourneyCommunicationsOwnerCycle } from "../services/guest-journey-communications-owner-cycle.service";
+import { executeGuestJourneyCommunicationDeliveryAdapter } from "../services/guest-journey-communications-delivery-adapter.service";
+import { recordMessageDeliveryOutcome } from "../services/guest-journey-communications-delivery-outcome.service";
+import { reconcileGuestJourneyCommunicationEvidence } from "../services/guest-journey-communications-recovery.service";
+import { preparePrecheckinShadow, seedPrecheckinShadow, runPrecheckinShadow, readPrecheckinShadow } from "./precheckin-shadow";
+
+export const prisma = new PrismaClient();
+export const fixtureRevision = (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? "local").slice(0, 12);
+export const fixtureMessageId = (scenario: string) => `gj_lab_${fixtureRevision}_message_${scenario}`;
+const fixtureReservationId = (scenario: string) => `gj_lab_${fixtureRevision}_${scenario}`;
+const organizationId = "gj_lab_organization";
+const propertyId = `gj_lab_property_${fixtureRevision}`;
+export const scope = { organizationId, propertyId };
+const scenarios = ["accepted", "empty_ack", "timeout", "ota_channel", "late_ack", "late_failure"] as const;
+
+export async function prepareLabTables(): Promise<void> {
+  await prisma.$executeRawUnsafe('CREATE SCHEMA IF NOT EXISTS guest_journey_lab');
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS guest_journey_lab.provider_call (
+    id BIGSERIAL PRIMARY KEY, message_id TEXT NOT NULL, scenario TEXT NOT NULL,
+    provider_id TEXT, attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS guest_journey_lab.heartbeat (
+    role TEXT PRIMARY KEY, commit_sha TEXT NOT NULL, observed_at TIMESTAMPTZ NOT NULL,
+    details JSONB NOT NULL
+  )`);
+  await preparePrecheckinShadow(prisma);
+}
+
+/** Seed once. Restarting must preserve claims, receipts and call counts. */
+export async function seedLabFixtures(): Promise<void> {
+  await prisma.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(727361941)`;
+    await tx.organization.upsert({ where: { id: organizationId }, update: {}, create: {
+      id: organizationId, name: "Guest Journey Lab — synthetic only",
+    } });
+    await tx.property.upsert({ where: { id: propertyId }, update: {}, create: {
+      id: propertyId, organizationId, name: "Synthetic test property", timezone: "America/Puerto_Rico",
+    } });
+    for (const scenario of scenarios) {
+      const reservationId = fixtureReservationId(scenario);
+      if (await tx.reservation.findUnique({ where: { id: reservationId } })) continue;
+      const now = Date.now();
+      await tx.reservation.create({ data: {
+        id: reservationId, propertyId, guestName: "Synthetic Guest",
+        guestEmail: `${scenario}@example.invalid`, guestPhone: "+15005550006",
+        checkIn: new Date(now + 24 * 60 * 60_000), checkOut: new Date(now + 48 * 60 * 60_000),
+        status: "ACTIVE", paymentState: "PAID",
+        source: scenario === "ota_channel" ? "Airbnb" : "DIRECT_BOOKING",
+        ...(scenario === "ota_channel" ? {
+          externalProvider: "CHANNEX", externalId: "11111111-1111-4111-8111-111111111111",
+        } : {}),
+        guestJourney: { create: {} },
+      } });
+      await tx.messageLog.create({ data: {
+        id: fixtureMessageId(scenario), ...scope, reservationId,
+        channel: "sms", communicationType: "PRECHECKIN", provider: "twilio",
+        to: "+15005550006", body: "SIMULATION ONLY: synthetic pre-check-in notice",
+        status: "APMS_PENDING",
+      } });
+    }
+  });
+  // Real E4 creates intents from the fixture outbox. This does not prove that
+  // reservation events generate every required first-send obligation.
+  for (const scenario of scenarios) {
+    const reservationId = fixtureReservationId(scenario);
+    const existing = await prisma.guestJourneyCoordinationIntent.count({ where: {
+      reservationId, targetEngine: "COMMUNICATIONS",
+    } });
+    if (!existing) await materializeGuestJourneyCoordinationIntents(prisma, reservationId, { scope });
+  }
+  await seedPrecheckinShadow(prisma, fixtureRevision);
+}
+
+export const runPrecheckinShadowProbe = () => runPrecheckinShadow(prisma, fixtureRevision);
+
+export async function heartbeat(role: string, details: Prisma.InputJsonValue): Promise<void> {
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA ?? "local";
+  await prisma.$executeRaw`INSERT INTO guest_journey_lab.heartbeat(role, commit_sha, observed_at, details)
+    VALUES (${role}, ${commit}, NOW(), ${JSON.stringify(details)}::jsonb)
+    ON CONFLICT(role) DO UPDATE SET commit_sha=EXCLUDED.commit_sha,
+      observed_at=EXCLUDED.observed_at, details=EXCLUDED.details`;
+}
+
+export async function runCommunicationsProbe(): Promise<unknown> {
+  const metrics = await runGuestJourneyCommunicationsOwnerCycle(prisma, {
+    enabled: true, organizationIds: [organizationId], propertyIds: [propertyId],
+    batchSize: 10, leaseMs: 60_000, maxClaims: 3, retryBaseMs: 30_000, providerTimeoutMs: 1_000,
+  }, { dependencies: {
+    execute: async (db, claim, options) => {
+      const messageId = String(claim.payload.messageLogId);
+      const scenario = scenarios.find(value => claim.reservationId === fixtureReservationId(value));
+      if (!scenario || messageId !== fixtureMessageId(scenario)) {
+        throw new Error("GJ_LAB_UNKNOWN_FIXTURE_REJECTED");
+      }
+      const send = async () => {
+        const providerId = ["accepted", "late_ack", "late_failure"].includes(scenario) ? `LAB_${messageId}` : null;
+        await prisma.$executeRaw`INSERT INTO guest_journey_lab.provider_call(message_id, scenario, provider_id)
+          VALUES (${messageId}, ${scenario}, ${providerId})`;
+        if (scenario === "timeout") return new Promise<never>(() => {});
+        if (scenario === "empty_ack") return {};
+        if (scenario === "ota_channel") throw new Error("GJ_LAB_OTA_ROUTING_REGRESSION");
+        if (scenario === "late_ack" || scenario === "late_failure") {
+          return new Promise(resolve => setTimeout(() => resolve({ sid: providerId }), 1_500));
+        }
+        return { sid: providerId };
+      };
+      return executeGuestJourneyCommunicationDeliveryAdapter(db, claim, options, {
+        sendSms: send as never,
+        sendEmail: async () => { throw new Error("GJ_LAB_UNEXPECTED_EMAIL_HANDLER"); },
+      });
+    },
+  } });
+  const accepted = await prisma.messageLog.findUnique({ where: { id: fixtureMessageId("accepted") } });
+  if (accepted?.providerMessageId && accepted.providerDeliveryStatus !== "DELIVERED") {
+    await recordMessageDeliveryOutcome(prisma, {
+      provider: "twilio", providerMessageId: accepted.providerMessageId,
+      status: "DELIVERED", eventAt: new Date(), deliveredAt: new Date(),
+    });
+  }
+  await heartbeat("communications", metrics);
+  return metrics;
+}
+
+/** Simulated callbacks are separate from send responses, including failures. */
+export async function emitLabRecoveryReceipts(): Promise<void> {
+  for (const scenario of ["late_ack", "late_failure"]) {
+    const message = await prisma.messageLog.findUnique({ where: { id: fixtureMessageId(scenario) } });
+    const status = scenario === "late_ack" ? "DELIVERED" : "UNDELIVERED";
+    if (!message?.providerMessageId || message.providerDeliveryStatus === status) continue;
+    const eventAt = new Date();
+    await recordMessageDeliveryOutcome(prisma, { provider: "twilio", providerMessageId: message.providerMessageId,
+      status, eventAt, deliveredAt: status === "DELIVERED" ? eventAt : null,
+    });
+  }
+}
+
+export async function runRecoveryProbe() {
+  await emitLabRecoveryReceipts();
+  const intents = await prisma.guestJourneyCoordinationIntent.findMany({ where: {
+    targetEngine: "COMMUNICATIONS", status: "WAITING_FOR_EVIDENCE", reservation: { propertyId },
+  }, orderBy: { id: "asc" }, take: 20, select: { id: true } });
+  const results = [];
+  for (const intent of intents) {
+    results.push(await reconcileGuestJourneyCommunicationEvidence(prisma, { intentId: intent.id, ...scope }));
+  }
+  return { checked: intents.length, recovered: results.filter(result => result.action === "RECOVERED").length, providerCalls: 0 };
+}
+
+export async function readLabEvidence() {
+  const [messages, intents, calls, workers, issues, attempts, recoveryAudit, precheckinShadow] = await Promise.all([
+    prisma.messageLog.findMany({ where: { organizationId, propertyId }, orderBy: { id: "asc" }, select: {
+      id: true, status: true, providerMessageId: true, providerDeliveryStatus: true,
+      deliveredAt: true, retryCount: true, error: true,
+    } }),
+    prisma.guestJourneyCoordinationIntent.findMany({ where: {
+      targetEngine: "COMMUNICATIONS", reservation: { propertyId },
+    }, orderBy: { createdAt: "asc" }, select: {
+      id: true, reservationId: true, intentType: true, status: true, claimCount: true,
+      leaseExpiresAt: true, nextActionAt: true, succeededAt: true, lastError: true,
+    } }),
+    prisma.$queryRaw<Array<{ scenario: string; calls: number }>>`SELECT scenario, COUNT(*)::int AS calls
+      FROM guest_journey_lab.provider_call
+      WHERE message_id IN (${Prisma.join(scenarios.map(fixtureMessageId))})
+      GROUP BY scenario ORDER BY scenario`,
+    prisma.$queryRaw<Array<{ role: string; commit_sha: string; observed_at: Date; details: unknown }>>`
+      SELECT role, commit_sha, observed_at, details FROM guest_journey_lab.heartbeat ORDER BY role`,
+    prisma.operationalIssue.findMany({ where: { organizationId, propertyId }, orderBy: { operationalKey: "asc" },
+      select: { id: true, issueCode: true, workflowState: true, visibility: true, title: true, resolvedAt: true } }),
+    prisma.guestJourneyCoordinationIntentAttempt.count({ where: { intent: { reservation: { propertyId } } } }),
+    prisma.apmsAuditEntry.findMany({ where: { organizationId, propertyId, reason: "COMMUNICATION_DELIVERY_RECEIPT_CONFIRMED" },
+      select: { decisionId: true, entityId: true, status: true, completedAt: true, metadata: true } }),
+    readPrecheckinShadow(prisma, fixtureRevision),
+  ]);
+  return {
+    mode: "SIMULATION_ONLY", fixtureRevision, productionReady: false, externalProviderCallsAllowed: false,
+    coverage: "E4/E7 outbox, claims, simulated send, callback persistence and replay; not full reservation certification",
+    knownGaps: ["unknown results without provider correlation", "callbacks arriving before provider ID persistence", "all-event first-send parity", "delivery-gated completion for initial sends", "full host Mission Control UI certification"],
+    messages, intents, calls, workers, operationalIssues: issues.length, issues, recoveryAudit, durableAttempts: attempts,
+    precheckinShadow,
+  };
+}
