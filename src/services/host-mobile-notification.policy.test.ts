@@ -5,8 +5,15 @@ const now=new Date('2026-10-16T18:00:00Z');
 const event: HostAttentionEvent={id:'signal-1',organizationId:'org-1',propertyId:'property-1',kind:'GUEST_INCIDENT',actionRequired:true,state:'ACTION_REQUIRED',severity:'WARNING',occurredAt:now};
 const recipient: HostPushRecipient={userId:'host-1',organizationId:'org-1',role:'ORG_ADMIN',activeSession:true,allowedPropertyIds:['property-1']};
 const preference: HostPushPreference={enabled:true,kinds:['GUEST_INCIDENT','GUEST_MESSAGE','CLEANING_EXCEPTION','ACCESS_EXCEPTION'],timezone:'America/Puerto_Rico',quietHours:{startHour:22,endHour:8,allowCritical:false}};
-test('only prepares generic metadata, never private source text or provider calls',()=>{
-  for(const kind of preference.kinds){const value=prepare({...event,kind,guestName:'PRIVATE',code:'1234567',text:'SECRET'} as HostAttentionEvent,recipient,preference,now);assert.equal(value.status,'PREPARED');if(value.status!=='PREPARED')return;assert.equal(value.payload.data.propertyId,'property-1');assert.equal(/PRIVATE|1234567|SECRET/.test(JSON.stringify(value)),false);assert.equal(value.payload.body,'Open Pin&Go Host to review the latest status.');}
+const expectedBodies = {
+  "NEW_RESERVATION": "You have a new reservation. Tap to review the stay details.",
+  "GUEST_INCIDENT": "A guest incident needs your attention. Tap to review it in Pin AI.",
+  "GUEST_MESSAGE": "A guest conversation needs your attention. Tap to open Messages.",
+  "CLEANING_EXCEPTION": "A cleaning needs your attention. Tap to review the cleaning update.",
+  "ACCESS_EXCEPTION": "A property access issue needs your attention. Tap to review it."
+};
+test('only prepares category metadata, never private source text or provider calls',()=>{
+  for(const kind of preference.kinds){const value=prepare({...event,kind,guestName:'PRIVATE',code:'1234567',text:'SECRET'} as HostAttentionEvent,recipient,preference,now);assert.equal(value.status,'PREPARED');if(value.status!=='PREPARED')return;assert.equal(value.payload.data.propertyId,'property-1');assert.equal(/PRIVATE|1234567|SECRET/.test(JSON.stringify(value)),false);assert.equal(value.payload.body,expectedBodies[kind]);}
 });
 test('tenant, property, current role, session and opt-out fail closed',()=>{
   for(const patch of [{organizationId:'other'},{allowedPropertyIds:[]},{activeSession:false},{role:'STAFF'}])assert.equal(prepare(event,{...recipient,...patch},preference,now).status,'SKIP');
@@ -37,7 +44,7 @@ test('new reservations are informational and respect opt-out, scope and quiet ho
  const p:HostPushPreference={...preference,kinds:['NEW_RESERVATION']};
  const prepared=prepare(e,recipient,p,now);
  assert.equal(prepared.status,'PREPARED');
- if(prepared.status==='PREPARED'){assert.equal(prepared.payload.title,'New reservation');assert.equal(prepared.payload.data.target,'reservation');}
+ if(prepared.status==='PREPARED'){assert.equal(prepared.payload.body,expectedBodies.NEW_RESERVATION);assert.equal(prepared.payload.title,'New reservation');assert.equal(prepared.payload.data.target,'reservation');}
  assert.equal(prepare(e,recipient,preference,now).status,'SKIP');
  assert.equal(prepare(e,{...recipient,organizationId:'other'},p,now).status,'SKIP');
  assert.equal(prepare({...e,state:'RESOLVED'},recipient,p,now).status,'SKIP');
