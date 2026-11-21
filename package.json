@@ -65,6 +65,8 @@
     "worker:pms-webhook-recovery": "tsx src/workers/pms-webhook-recovery.worker.ts",
     "worker:channex-global-feed": "tsx src/workers/channex-global-feed.worker.ts",
     "worker:channex-ari-dispatch": "tsx src/workers/channex-ari-dispatch.process.ts",
+    "worker:distribution-rate-refresh": "tsx src/workers/distribution-rate-refresh.worker.ts",
+    "test:distribution-rate-refresh": "node --import tsx --test src/distribution/rate-refresh.*.test.ts && tsc -p tsconfig.distribution-rate-refresh.json",
     "channex:staging:configure-booking-webhook": "tsx src/scripts/configure-channex-staging-booking-webhook.ts",
     "channex:live:configure-booking-webhook": "tsx src/scripts/configure-channex-live-booking-webhook.ts",
     "channex:staging:check-readiness": "tsx src/scripts/check-channex-staging-readiness.ts",

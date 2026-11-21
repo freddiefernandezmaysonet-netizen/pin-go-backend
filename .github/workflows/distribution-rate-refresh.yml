@@ -1,0 +1,43 @@
+name: Distribution rate refresh
+on:
+  pull_request:
+    paths:
+      - 'src/distribution/rate-refresh*'
+      - 'src/workers/distribution-rate-refresh.worker.ts'
+      - 'railway.distribution-rate-refresh.json'
+      - 'tsconfig.distribution-rate-refresh.json'
+      - '.github/workflows/distribution-rate-refresh.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://test:test@127.0.0.1:5432/test
+      RATE_REFRESH_POSTGRES_TEST_URL: postgresql://test:test@127.0.0.1:5432/test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:distribution-rate-refresh
+      - run: node --import tsx --test src/contracts/channex-certified-core.freeze.test.ts
+      - run: npx esbuild src/workers/distribution-rate-refresh.worker.ts --bundle --platform=node --packages=external --format=esm --outfile=/tmp/distribution-rate-refresh.mjs
