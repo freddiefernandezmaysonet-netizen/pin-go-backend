@@ -28,7 +28,7 @@ function getPublicApiUrl() {
     .replace(/\/+$/, "");
 }
 
-function buildGuestVerificationUrl(token: string) {
+export function buildGuestVerificationUrl(token: string) {
   return (
     `${getPublicApiUrl()}/guest/verify/` +
     encodeURIComponent(token)
@@ -56,7 +56,7 @@ function hasValidCoordinates(
   return true;
 }
 
-function buildGoogleMapsLink(input: {
+export function buildGoogleMapsLink(input: {
   latitude?: unknown;
   longitude?: unknown;
   address1?: string | null;
