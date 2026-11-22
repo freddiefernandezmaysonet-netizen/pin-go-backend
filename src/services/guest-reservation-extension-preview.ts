@@ -84,13 +84,15 @@ export async function previewGuestReservationExtension(
   const base = record(current.pricingBreakdown);
   const currentTotalAmountCents = money(current.totalAmount);
   const baseNightly = money(base.nightlySubtotal);
+  const baseDiscount = base.accommodationDiscountTotal === undefined ? 0 : money(base.accommodationDiscountTotal);
+  if (baseDiscount > baseNightly) throw new InStayExtensionError("EXTENSION_PRICING_SNAPSHOT_INVALID");
   const baseCleaning = money(base.cleaningFee);
   const baseAmenities = money(base.amenitiesTotal);
   const baseTaxes = money(base.taxesTotal);
   if (String(base.currency ?? "").toLowerCase() !== current.currency.toLowerCase() ||
       money(base.totalAmount) !== currentTotalAmountCents ||
       (base.totalAmountCents !== undefined && base.totalAmountCents !== currentTotalAmountCents) ||
-      baseNightly + baseCleaning + baseAmenities + baseTaxes !== currentTotalAmountCents) {
+      baseNightly - baseDiscount + baseCleaning + baseAmenities + baseTaxes !== currentTotalAmountCents) {
     throw new InStayExtensionError("EXTENSION_PRICING_SNAPSHOT_MISMATCH");
   }
   const oldNights = rows(base.nightlyRates);
@@ -158,10 +160,14 @@ export async function previewGuestReservationExtension(
       ...base, currency: quote.currency, nights: plan.totalNights,
       nightlyRates: [...oldNights, ...extensionSnapshot.nightlyRates],
       nightlySubtotal: (baseNightly + quote.nightlySubtotalCents) / 100,
+      ...(base.accommodationDiscountTotal !== undefined ? {
+        accommodationSubtotalBeforeDiscount: (baseNightly + quote.nightlySubtotalCents) / 100,
+        accommodationSubtotalAfterDiscount: (baseNightly - baseDiscount + quote.nightlySubtotalCents) / 100,
+      } : {}),
       cleaningFee: baseCleaning / 100,
       amenities, chargedAmenities: amenities.filter((item) => item.amount > 0),
       amenitiesTotal: (baseAmenities + quote.amenitiesTotalCents) / 100,
-      taxableSubtotal: (baseNightly + baseCleaning + baseAmenities + quote.nightlySubtotalCents + quote.amenitiesTotalCents) / 100,
+      taxableSubtotal: (baseNightly - baseDiscount + baseCleaning + baseAmenities + quote.nightlySubtotalCents + quote.amenitiesTotalCents) / 100,
       taxes, taxesTotal: (baseTaxes + quote.taxesTotalCents) / 100,
       totalAmount: quote.proposedTotalAmountCents / 100, totalAmountCents: quote.proposedTotalAmountCents,
       extensionQuotes: [...(Array.isArray(base.extensionQuotes) ? base.extensionQuotes : []), extensionSnapshot],

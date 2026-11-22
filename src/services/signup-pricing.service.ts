@@ -1,7 +1,7 @@
 export const haasMonthlyAmounts = {
-  essential: { 12: 5499, 24: 4499 },
-  pro: { 12: 7499, 24: 6499 },
-  elite: { 12: 8499, 24: 7499 },
+  essential: { 12: 5999, 24: 4999 },
+  pro: { 12: 7999, 24: 6999 },
+  elite: { 12: 8999, 24: 7999 },
 } as const;
 
 export function resolveHaasPrice(selection: any, locks: number, interval: string, env: Record<string, string | undefined> = process.env) {
@@ -26,6 +26,7 @@ export function assertMonthlyPrice(price: any, amount: number, interval: 'month'
 }
 
 export function haasPriceIds(env: Record<string, string | undefined> = process.env) {
-  return Object.keys(haasMonthlyAmounts).flatMap(model => [12,24].map(term => env[`STRIPE_PRICE_HAAS_${model.toUpperCase()}_${term}_MONTHLY`]))
+  return [...Object.keys(haasMonthlyAmounts).flatMap(model => [12,24].map(term => env[`STRIPE_PRICE_HAAS_${model.toUpperCase()}_${term}_MONTHLY`])),
+    ...(env.STRIPE_PRICE_HAAS_LEGACY_IDS ?? "").split(",")]
     .filter((id): id is string => Boolean(id?.trim())).map(id => id.trim());
 }

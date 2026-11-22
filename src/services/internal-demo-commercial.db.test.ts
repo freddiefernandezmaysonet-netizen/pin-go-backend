@@ -295,6 +295,40 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     assert.equal((await sendInternalDemoMessage(uncertain)).status, "ATTENTION_REQUIRED");
     assert.equal((await sendInternalDemoMessage(uncertain)).ok, false); assert.equal(attempts, 1);
   });
+  await t.test("concurrent Demo message replays send once without database errors and preserve unknown outcomes", async () => {
+    const { sendInternalDemoMessage } = await import("./internal-demo-message.service.js");
+    const messageDb = new PrismaClient({ log: [{ emit: "event", level: "error" }] });
+    const errors: string[] = [];
+    messageDb.$on("error", event => errors.push(event.message));
+    let attempts = 0;
+    const message = { prisma: messageDb, reservationId, propertyId, organizationId: org.id,
+      type: "SYNTHETIC_CONCURRENT_REPLAY_TEST", channel: "email" as const,
+      to: "concurrent@example.invalid", body: "Synthetic replay test", send: async () => {
+        attempts++;
+        return { id: "synthetic-concurrent-provider-id" };
+      } };
+    try {
+      const batch = await Promise.all(Array.from({ length: 8 }, () => sendInternalDemoMessage(message)));
+      assert.equal(attempts, 1);
+      assert.equal(new Set(batch.map(row => row.messageId)).size, 1);
+      const replay = await sendInternalDemoMessage(message);
+      assert.equal(replay.status, "ACCEPTED");
+      assert.equal(replay.providerMessageId, "synthetic-concurrent-provider-id");
+      assert.equal(await db.messageLog.count({ where: { id: replay.messageId } }), 1);
+      assert.equal(await db.messageDispatchLog.count({ where: { reservationId, type: message.type } }), 1);
+
+      const ambiguous = { ...message, type: "SYNTHETIC_CONCURRENT_UNKNOWN_TEST", send: async () => {
+        attempts++; throw new Error("synthetic provider result unknown");
+      } };
+      const unknown = await Promise.all(Array.from({ length: 8 }, () => sendInternalDemoMessage(ambiguous)));
+      assert.ok(unknown.every(row => !row.ok));
+      assert.equal((await sendInternalDemoMessage(ambiguous)).status, "ATTENTION_REQUIRED");
+      assert.equal(attempts, 2, "replays must never contact the provider again");
+      assert.equal(await db.messageLog.count({ where: { id: unknown[0].messageId } }), 1);
+      assert.equal(await db.messageDispatchLog.count({ where: { reservationId, type: ambiguous.type } }), 0);
+      assert.deepEqual(errors, [], "expected replays must not produce database errors");
+    } finally { await messageDb.$disconnect(); }
+  });
   await t.test("real grant service provisions exact minute window only on Demo lock; guest NFC uses same dates", async () => {
     // Explicit synthetic verification fixture for the hardware portion only.
     // Demo creation above must leave acceptance to the participant.
@@ -525,6 +559,49 @@ test("one Demo reservation through HTTP, messages, access, incident, host and cl
     const returning = await createGrant(); await activateGrant(returning.id);
     assert.equal(decryptAccessCode((await db.accessCode.findUniqueOrThrow({ where: { accessGrantId: returning.id } })).accessCodeEnc!), "0001",
       "a confirmed revoked and deleted PIN may be reused without rewriting the old access");
+  });
+  await t.test("expired unfinished Demo blocks preparation and can be archived without inventing completion", async () => {
+    const past = new Date(Date.now() - 10 * 86400000);
+    const old = await db.reservation.create({ data: { propertyId, guestName: "Synthetic abandoned Demo",
+      source: "INTERNAL_DEMO_DIRECT_BOOKING", externalProvider: "PIN_GO_INTERNAL_DEMO", externalId: "DEMO-archive-regression",
+      externalRaw: { demo: true, paymentSimulated: true }, status: "ACTIVE", paymentState: "PAID", totalAmount: 0,
+      checkIn: new Date(past.getTime() - 1200000), checkOut: past } });
+    const offer = await db.cleaningConfirmation.create({ data: { reservationId: old.id, propertyId,
+      staffMemberId: cleaner.id, token: "synthetic-expired-archive-offer", status: "CONFIRMED" } });
+    const started = new Date(past.getTime() + 20 * 60000);
+    const work = await db.cleaningWork.create({ data: { reservationId: old.id, propertyId, staffMemberId: cleaner.id,
+      confirmationId: offer.id, scheduledStartAt: new Date(past.getTime() + 15 * 60000), durationCommitmentMinutes: 30,
+      startConfirmationGraceMinutes: 10, followupGraceMinutes: 15, startConfirmedAt: started } });
+    const future = new Date(Date.now() + 100 * 86400000);
+    const candidate = await db.reservation.create({ data: { propertyId, guestName: "Synthetic next Demo",
+      source: "INTERNAL_DEMO_DIRECT_BOOKING", status: "ACTIVE", paymentState: "PAID",
+      checkIn: new Date(future.getTime() - 1200000), checkOut: future } });
+    const candidateOffer = await db.cleaningConfirmation.create({ data: { reservationId: candidate.id, propertyId,
+      staffMemberId: cleaner.id, token: "synthetic-next-demo-offer", status: "PENDING" } });
+    const transportsBefore = [emails.length, sms.length, hardware.length];
+    const rejected = await fetch(`${base}/cleaning/confirm/${candidateOffer.token}/confirm`, { method: "POST" });
+    assert.equal(rejected.status, 409, "reproduce the early availability rejection with an unfinished old Demo");
+    assert.match(await rejected.text(), /otra limpieza en curso sin finalizar/);
+    let prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
+    assert.ok(prep.data.blockers.includes("CLEANER_UNFINISHED_WORK"));
+    assert.equal(prep.data.cleaningBlockers.find((w: any) => w.workId === work.id)?.canArchive, true);
+    const archive = (role = "PLATFORM_ADMIN") => fetch(`${base}/api/internal/admin/demo/archive-expired-cleaning`, {
+      method: "POST", headers: { "content-type": "application/json", "x-test-role": role }, body: JSON.stringify({ workId: work.id }),
+    });
+    assert.equal((await archive("ORG_ADMIN")).status, 403);
+    assert.equal((await archive()).status, 200);
+    assert.equal((await (await archive()).json() as any).data.replayed, true);
+    const saved = await db.cleaningWork.findUniqueOrThrow({ where: { id: work.id } });
+    assert.equal(saved.startConfirmedAt!.getTime(), started.getTime());
+    assert.equal(saved.completionConfirmedAt, null); assert.ok(saved.cancelledAt);
+    assert.equal((await db.cleaningConfirmation.findUniqueOrThrow({ where: { id: offer.id } })).status, "CANCELLED");
+    assert.equal(await db.apmsAuditEntry.count({ where: { decisionId: `demo-cleaning-abandoned:${work.id}` } }), 1);
+    const { acceptCleaningOffer } = await import("./cleaning-reassignment.service.js");
+    assert.equal((await acceptCleaningOffer(db, { confirmationId: candidateOffer.id, staffMemberId: cleaner.id,
+      organizationId: org.id })).replayed, false, "the same guarded eligibility now accepts a future offer");
+    prep = await (await fetch(`${base}/api/internal/admin/demo/preparation`)).json() as any;
+    assert.equal(prep.data.cleaningBlockers.some((w: any) => w.workId === work.id), false);
+    assert.deepEqual([emails.length, sms.length, hardware.length], transportsBefore);
   });
   assert.deepEqual(await db.reservation.findUniqueOrThrow({ where: { id: commercial.id } }), commercial);
   assert.equal((await db.property.findUniqueOrThrow({ where: { id: propertyId } })).cleaningDurationMinutes, 240);

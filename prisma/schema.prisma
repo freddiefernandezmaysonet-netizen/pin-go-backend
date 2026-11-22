@@ -229,6 +229,9 @@ model OrganizationInvitation {
 }
 
 model Property {
+  directDiscountConfig DirectBookingDiscountConfig?
+  directPricingSnapshots DirectBookingPricingSnapshot[]
+
   cleaningRecoveryPolicy CleaningRecoveryPolicy?
   cleaningChecklistTemplate CleaningChecklistTemplate?
   cleaningTaskChecklists CleaningTaskChecklist[]
@@ -3822,4 +3825,23 @@ model HostMobileReservationEvent {
   occurredAt DateTime?
   createdAt DateTime @default(now())
   @@index([occurredAt])
+}
+
+model DirectBookingDiscountConfig {
+  propertyId String @id
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  config Json
+  version Int @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+model DirectBookingPricingSnapshot {
+  id String @id @default(cuid())
+  propertyId String
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  checkIn DateTime
+  checkOut DateTime
+  pricing Json
+  createdAt DateTime @default(now())
+  @@index([propertyId, createdAt])
 }

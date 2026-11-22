@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { createCleaningWorkSnapshotStore } from "./cleaning-work-snapshot.prisma.js";
+import { createCleaningFollowupReceiptStore } from "./cleaning-followup-receipt.prisma.js";
 import { materializeCleaningWorkSnapshot, type CleaningWorkScope } from "./cleaning-work-snapshot.service.js";
 
 // Fail rather than skip. This test must never use a production or staging URL.
@@ -38,6 +39,32 @@ async function count(scope: CleaningWorkScope) {
 
 test("CleaningWork persistence on disposable PostgreSQL", { timeout: 60000 }, async t => {
   try {
+    await t.test("concurrent follow-up claims have one owner, no database errors and preserve delivery evidence", async () => {
+      const receiptDb = new PrismaClient({ log: [{ emit: "event", level: "error" }] });
+      const errors: string[] = [];
+      receiptDb.$on("error", event => errors.push(event.message));
+      const receipts = createCleaningFollowupReceiptStore(receiptDb);
+      const input = { cleaningWorkId: randomUUID(), kind: "START_REMINDER" as const, dueAt: TEST_NOW };
+      try {
+        const claims = await Promise.all(Array.from({ length: 8 }, () => receipts.claim(input)));
+        assert.equal(claims.filter(row => row.status === "CLAIMED").length, 1);
+        assert.equal(claims.filter(row => row.status === "ALREADY_CLAIMED").length, 7);
+        assert.equal(new Set(claims.map(row => row.receiptId)).size, 1);
+        assert.equal(await receiptDb.cleaningFollowupReceipt.count({ where: { cleaningWorkId: input.cleaningWorkId } }), 1);
+        const id = claims[0].receiptId;
+        const delivered = await receiptDb.cleaningFollowupReceipt.update({ where: { id }, data: {
+          deliveryStatus: "DELIVERED", deliveredAt: TEST_NOW, providerMessageId: "synthetic-followup-id",
+        } });
+        assert.deepEqual(await receipts.claim(input), { status: "ALREADY_CLAIMED", receiptId: id });
+        assert.deepEqual(await receiptDb.cleaningFollowupReceipt.findUniqueOrThrow({ where: { id } }), delivered);
+        assert.equal((await receipts.claim({ ...input, kind: "COMPLETION_REMINDER" })).status, "CLAIMED");
+        assert.equal((await receipts.claim({ ...input, dueAt: new Date(TEST_NOW.getTime() + 60000) })).status, "CLAIMED");
+        assert.deepEqual(errors, [], "normal repeated scans must not emit database errors");
+      } finally {
+        await receiptDb.cleaningFollowupReceipt.deleteMany({ where: { cleaningWorkId: input.cleaningWorkId } });
+        await receiptDb.$disconnect();
+      }
+    });
     await t.test("concurrent same-work requests persist one record and replay", async () => {
       const scope = await fixture();
       const results = await Promise.all([materializeCleaningWorkSnapshot(store, scope, TEST_NOW), materializeCleaningWorkSnapshot(store, scope, TEST_NOW)]);

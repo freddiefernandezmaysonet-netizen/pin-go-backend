@@ -1,3 +1,4 @@
+import { calculateDiscountedDirectQuote } from "./direct-booking-discounted-quote.service";
 import Stripe from "stripe";
 import { buildGuestReservationModificationCheckoutSessionParams } from "./guest-reservation-modification-checkout-contract.js";
 import { extensionStateFingerprint, reservationStateFingerprint } from "../pin-ai/actions/reservation-state-fingerprint.js";
@@ -31,7 +32,7 @@ type CheckoutDependencies = {
 };
 const defaultCheckoutDependencies: CheckoutDependencies = {
   client: prisma, stripe, now: () => new Date(),
-  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDirectBookingPricing,
+  checkAvailability: checkPropertyAvailability, calculatePricing: calculateDiscountedDirectQuote,
   assertPayoutReady: assertDirectBookingPayoutReady,
 };
 

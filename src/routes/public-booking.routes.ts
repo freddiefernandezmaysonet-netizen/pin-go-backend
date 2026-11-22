@@ -1,3 +1,7 @@
+import { bookingCampaignMetadata } from "../services/direct-booking-attribution.js";
+import { calculateDiscountedDirectQuote } from "../services/direct-booking-discounted-quote.service";
+import { buildCheckoutStatusRouter } from "./public-booking.checkout-status.routes.js";
+import { guestPinAIInformationEnabled } from "../pin-ai/guest-information-availability.js";
 import { directPinAIFeeSnapshot } from "../pin-ai/hybrid-fee-evidence.service.js";
 import { getIdentityCheckFeeCents } from "../services/identity-check-billing-consent.js";
 import { buildPublicStaysSitemapRouter } from "./public-stays-sitemap.routes.js";
@@ -41,9 +45,11 @@ import {
   type PublishedBrandContext,
 } from "../services/branding/published-brand-context.service.js";
 
-const prisma = new PrismaClient();
+export const publicBookingDb = new PrismaClient();
+const prisma = publicBookingDb;
 const publicBookingRouter = Router();
 publicBookingRouter.use(damagePaymentAuthorizationRouter(prisma));
+publicBookingRouter.use(buildCheckoutStatusRouter(prisma));
 
 const SECURE_PRECHECKIN_DISCLOSURE_VERSION =
   "secure_precheckin_disclosure_v1";
@@ -1098,6 +1104,9 @@ return res.json({
   publicBrand,
   property: {
     ...property,
+    pinAIEnabled: await guestPinAIInformationEnabled(prisma, process.env, {
+      propertyId: property.id, organizationId: property.organizationId,
+    }),
     cancellationPolicy,
     cancellationPolicyPresentation,
     propertyProtection: property.propertyProtectionEnabled
@@ -1465,7 +1474,7 @@ publicBookingRouter.post("/quote", async (req, res) => {
       });
     }
 
-    const pricing = await calculateDirectBookingPricing({
+    const pricing = await calculateDiscountedDirectQuote({
       propertyId: property.id,
       checkIn: stayDates.checkIn,
       checkOut: stayDates.checkOut,
@@ -1575,6 +1584,7 @@ if (guestAcceptedSecurePreCheckinRequirement !== true) {
         id: true,
         organizationId: true,
         name: true,
+        slug: true,
         publicTitle: true,
         baseNightlyRate: true,
         cleaningFee: true,
@@ -1743,13 +1753,20 @@ const cleanSelectedAmenityIds = Array.isArray(selectedAmenityIds)
   ? selectedAmenityIds.map((id) => String(id)).filter(Boolean)
   : [];
 
-const pricing = await calculateDirectBookingPricing({
+const pricing = await calculateDiscountedDirectQuote({
   propertyId: property.id,
   checkIn: stayDates.checkIn,
   checkOut: stayDates.checkOut,
   selectedAmenityIds: cleanSelectedAmenityIds,
 });
 
+if (req.body?.expectedTotalAmountCents !== undefined &&
+  req.body.expectedTotalAmountCents !== pricing.totalAmountCents) {
+  return res.status(409).json({ ok: false, error: "QUOTE_CHANGED",
+    message: normalizedPreferredLanguage === "es"
+      ? "El precio cambió. Actualiza la cotización antes de pagar."
+      : "The price changed. Refresh your quote before paying." });
+}
 const totalAmount = pricing.totalAmount;
 const totalAmountCents = pricing.totalAmountCents;
 
@@ -1870,6 +1887,10 @@ const guestAcceptedSecurePreCheckinRequirementText =
 
     const APP_URL = process.env.APP_URL ?? "http://localhost:3000";
 
+    const pricingSnapshot = await prisma.directBookingPricingSnapshot.create({ data: {
+      propertyId: property.id, checkIn: stayDates.checkIn, checkOut: stayDates.checkOut,
+      pricing: JSON.parse(JSON.stringify(pricing)),
+    } });
     const session = await stripe.checkout.sessions.create({
   mode: "payment",
   locale: normalizedPreferredLanguage,
@@ -1894,7 +1915,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
       success_url:
         `${APP_URL}/booking/success?organization=${encodeURIComponent(
           String(property.organization.slug)
-        )}&identityCheck=${
+        )}&property=${encodeURIComponent(String(property.slug ?? ""))}&session_id={CHECKOUT_SESSION_ID}&identityCheck=${
           identityVerificationRequired
             ? "required"
             : "optional"
@@ -1930,7 +1951,7 @@ const guestAcceptedSecurePreCheckinRequirementText =
         adults: String(adultsCount),
         children: String(childrenCount),
         nights: String(nights),
-        nightlyRate: String(pricing.nightlyRate),
+        pricingSnapshotId: pricingSnapshot.id,
         cleaningFee: String(pricing.cleaningFee),
         amenitiesTotal: String(pricing.amenitiesTotal),
         selectedAmenityIds: JSON.stringify(cleanSelectedAmenityIds),
@@ -1966,7 +1987,8 @@ const guestAcceptedSecurePreCheckinRequirementText =
           refundPercentBeforeDeadline: String(cancellationPolicySnapshot.refundPercentBeforeDeadline),
           refundPercentAfterDeadline: String(cancellationPolicySnapshot.refundPercentAfterDeadline),
         }),
-        freeCancellationHoursBeforeCheckIn: String(
+        ...bookingCampaignMetadata(
+          req.body?.bookingCampaign,
           cancellationPolicySnapshot.freeCancellationHoursBeforeCheckIn
         ),
       },
@@ -1987,10 +2009,10 @@ const guestAcceptedSecurePreCheckinRequirementText =
      pricing, 
     });
   } catch (error: any) {
-    console.error("[public-booking create-checkout error]", error?.message ?? error);
+    console.error("[public-booking create-checkout error]", { code: "CHECKOUT_CREATE_FAILED" });
     return res.status(500).json({
       ok: false,
-      error: error?.message ?? "Failed to create checkout",
+      error: "Failed to create checkout",
     });
   }
 });

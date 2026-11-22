@@ -100,6 +100,72 @@ const noEmail = async () => {
   throw new Error("email must not execute");
 };
 
+const firstSendReservation = {
+  status: "ACTIVE", source: "DIRECT_BOOKING", externalProvider: null, externalId: null,
+  paymentState: "PAID", cancelledAt: null, createdAt: new Date(now.getTime() - 86400000),
+  checkIn: new Date(now.getTime() + 3600000), checkOut: new Date(now.getTime() + 86400000),
+  guestEmail: "guest@example.com", guestPhone: "+17875550101",
+  externalRaw: { consent: { smsConsent: true, acceptedAt: "2026-08-01T00:00:00Z" } },
+};
+const firstSendOptions = { now, firstSendContract: "PRECHECKIN_DELIVERY_V1" as const };
+
+test("certified first SMS permits legacy catch-up but acceptance never closes delivery or repeats", async () => {
+  for (const checkIn of [firstSendReservation.checkIn, new Date(now.getTime() - 3600000)]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" }, reservation: { ...firstSendReservation, checkIn } });
+    const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION");
+    let calls = 0;
+    const deps = { sendSms: async () => { calls++; return { sid: "SM-first", status: "queued" as const }; }, sendEmail: noEmail };
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, firstSendOptions, deps);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(f.message.status, "E7_SENDING");
+    assert.equal(f.message.providerMessageId, "SM-first");
+    assert.equal(f.message.deliveredAt, null);
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, firstSendOptions, deps);
+    assert.equal(calls, 1);
+  }
+});
+
+test("first email preserves late-booking eligibility and rejects the older booking after arrival", async () => {
+  for (const lateBooking of [false, true]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING", channel: "email", to: "guest@example.com",
+      body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: "PRECHECKIN", retryPayload: {} }) },
+      reservation: { ...firstSendReservation, checkIn: new Date(now.getTime() - 3600000),
+        createdAt: lateBooking ? now : firstSendReservation.createdAt } });
+    let calls = 0;
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "email" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("unexpected SMS"); }, sendEmail: async () => { calls++; return { data: { id: "EM-first" } }; } });
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(calls, lateBooking ? 1 : 0);
+  }
+});
+
+test("first-send recheck prevents withdrawn consent, payment loss and inactive reservations reaching a provider", async () => {
+  for (const patch of [{ externalRaw: null }, { paymentState: "NONE" }, { status: "CANCELLED" }, { cancelledAt: now }]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" },
+      reservationSequence: [firstSendReservation, { ...firstSendReservation, ...patch }] });
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("must not send"); }, sendEmail: noEmail });
+    assert.equal(result.providerCalls, 0);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(f.message.status, "APMS_PENDING");
+  }
+});
+
+test("strict first-send rejects OTA, not-due and expired reservations without declaring delivery", async () => {
+  for (const patch of [{ source: "Airbnb", externalProvider: "CHANNEX", externalId: "ota" },
+    { checkIn: new Date(now.getTime() + 5 * 3600000) },
+    { checkIn: new Date(now.getTime() - 86400000), checkOut: now }]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" }, reservation: { ...firstSendReservation, ...patch } });
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("must not send"); }, sendEmail: noEmail });
+    assert.equal(result.providerCalls, 0);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  }
+});
+
 test("late provider acknowledgement is retained without delivery success or another send", async () => {
   const f = fakePrisma({});
   let resolve!: (value: any) => void;

@@ -20,7 +20,7 @@ import {
 } from "./cleaning-confirmation-dispatch.service";
 import { selectNextStaffForProperty } from "./staff-selection.service";
 import { guestAccessWindow, guestAccessNeedsSync, synchronizeGuestAccessWindow } from "./reservation-guest-access-window";
-import { planCleaningWindow } from "./reservation-cleaning-window";
+import { isHistoricalDemoWithoutCleanerAccess, planCleaningWindow } from "./reservation-cleaning-window";
 
 type ChangePlan = {
   reservationId: string;
@@ -178,8 +178,13 @@ const reservationDatesChanged =
   (prevIn.getTime() !== desiredStart.getTime() ||
     prevOut.getTime() !== desiredEnd.getTime());
 
+  const reconcileCleanerWindow = reservation.property.cleaningNfcEnabled &&
+    !isHistoricalDemoWithoutCleanerAccess({
+      propertyId: reservation.propertyId, source: reservation.source,
+      checkOut: desiredEnd, assignments: reservation.NfcAssignment ?? [], now: new Date(),
+    });
   let cleanerWindow: Awaited<ReturnType<typeof readCleanerAccessWindow>> | null = null;
-  if (reservation.property.cleaningNfcEnabled) {
+  if (reconcileCleanerWindow) {
     try {
       cleanerWindow = await readCleanerAccessWindow(prisma, reservation);
     } catch (error) {
@@ -209,7 +214,7 @@ const reservationDatesChanged =
 
   const cleaningWindow = planCleaningWindow({
     checkOut: desiredEnd, previousCheckOut: prevOut,
-    enabled: reservation.property.cleaningNfcEnabled,
+    enabled: reconcileCleanerWindow,
     accessWindow: cleanerWindow, assignments: reservation.NfcAssignment ?? [],
   });
   const cleaningReconfirmationNeeded = cleaningWindow.requiresReconfirmation;

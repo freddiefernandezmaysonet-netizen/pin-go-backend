@@ -1,3 +1,4 @@
+import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { deliverOtaOperationalCommunication } from "../channex-messaging/ota-operational-guest.service.js";
@@ -27,7 +28,7 @@ function getPublicApiUrl() {
     .replace(/\/+$/, "");
 }
 
-function buildGuestVerificationUrl(token: string) {
+export function buildGuestVerificationUrl(token: string) {
   return (
     `${getPublicApiUrl()}/guest/verify/` +
     encodeURIComponent(token)
@@ -55,7 +56,7 @@ function hasValidCoordinates(
   return true;
 }
 
-function buildGoogleMapsLink(input: {
+export function buildGoogleMapsLink(input: {
   latitude?: unknown;
   longitude?: unknown;
   address1?: string | null;
@@ -357,6 +358,7 @@ export async function sendPreCheckinEmail(
           : null;
 
       return sendGuestPreCheckinEmail({
+        directBookingUrl: await resolvePrecheckinDirectBookingUrl(prisma, r.id),
         to: r.guestEmail!,
         replyTo: replyTo?.email ?? null,
         reservationNumber,

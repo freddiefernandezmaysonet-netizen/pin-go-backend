@@ -1,3 +1,5 @@
+import { paidBookingAttribution } from "./direct-booking-attribution.js";
+import { validatePaidPricingSnapshot } from "./direct-booking-pricing-snapshot.policy";
 import { captureDirectPinAIFee } from "../pin-ai/hybrid-fee-evidence.service.js";
 import Stripe from "stripe";
 import { randomBytes } from "crypto";
@@ -939,12 +941,15 @@ if (propertyProtectionRequired) {
 }
 
 const selectedAmenityIds = parseSelectedAmenityIds(session);
-const pricingBreakdown = await calculateDirectBookingPricing({
-  propertyId: property.id,
-  checkIn,
-  checkOut,
-  selectedAmenityIds,
-});
+const pricingSnapshotId = session.metadata?.pricingSnapshotId;
+const pricingSnapshot = pricingSnapshotId ? await prisma.directBookingPricingSnapshot.findUnique({
+  where: { id: pricingSnapshotId },
+}) : null;
+// Legacy sessions retain their existing path. New checkouts never reprice after payment.
+const pricingBreakdown = pricingSnapshotId
+  ? validatePaidPricingSnapshot(pricingSnapshot, { propertyId: property.id, checkIn, checkOut,
+      amountTotal: session.amount_total, currency: session.currency })
+  : await calculateDirectBookingPricing({ propertyId: property.id, checkIn, checkOut, selectedAmenityIds });
 
 const ingestResult = await ingestReservation({
   source: "DIRECT_BOOKING",
@@ -966,6 +971,7 @@ const ingestResult = await ingestReservation({
   externalUpdatedAt: new Date().toISOString(),
   externalRaw: {
     stripeCheckoutSessionId: session.id,
+    bookingAttribution: paidBookingAttribution(session.metadata?.bookingCampaign),
     stripePaymentIntentId: paymentIntentId,
     amountTotal: session.amount_total,
     currency: session.currency,
@@ -1090,6 +1096,7 @@ if (updatedReservation.guestEmail) {
     );
 
   const directBookingGuestEmailInput = {
+    pinAIPropertyScope: { organizationId: property.organizationId, propertyId: property.id },
     to: updatedReservation.guestEmail,
     replyTo: guestReplyTo.email,
     reservationNumber: notificationReservation.reservationNumber,

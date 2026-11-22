@@ -6,6 +6,7 @@ export type GuestReservationEmailMode =
 
 export interface GuestReservationEmailInput {
   mode: GuestReservationEmailMode;
+  pinAIEnabled?: boolean;
   reservationNumber: string;
   guestName?: string | null;
   propertyName: string;
@@ -426,6 +427,67 @@ export function buildGuestReservationEmail(
           ${verificationBlock}
 
           ${manageReservationBlock}
+
+          ${input.mode === "DIRECT_BOOKING" && manageReservationBlock ? `
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:18px;margin:20px 0;color:#1e3a8a;">
+            <h3 style="margin:0 0 8px;">${isSpanish ? "Tu estadía, paso a paso" : "Your stay, step by step"}</h3>
+            <ol style="margin:0;padding-left:22px;">
+              <li>${isSpanish
+                ? "Guarda este correo y abre Administrar reservación para consultar los detalles y completar los requisitos de pre-check-in que correspondan a tu alojamiento."
+                : "Keep this email and open Manage reservation to review your details and complete the pre-check-in requirements for your accommodation."}</li>
+              <li>${isSpanish
+                ? "Antes de llegar, revisa las instrucciones de acceso y los horarios de tu reserva. El acceso se habilita según los requisitos y la ventana de entrada; la confirmación por sí sola no permite entrar antes."
+                : "Before arrival, review your access instructions and reservation times. Access is enabled according to the requirements and entry window; confirmation alone does not permit early entry."}</li>
+              <li>${isSpanish
+                ? "Durante tu estadía, usa Administrar reservación para consultar las opciones disponibles. Los cambios, cancelaciones y solicitudes de horarios dependen de disponibilidad, condiciones y posibles cargos. Espera su confirmación antes de dar un cambio por hecho."
+                : "During your stay, use Manage reservation to review available options. Changes, cancellations, and time requests depend on availability, conditions, and possible charges. Wait for confirmation before treating a change as final."}</li>
+              <li>${isSpanish
+                ? "Antes de salir, revisa la hora de checkout y las instrucciones de tu alojamiento."
+                : "Before leaving, review your checkout time and your accommodation’s departure instructions."}</li>
+            </ol>
+          </div>
+          ${input.pinAIEnabled === true ? `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:20px 0;">
+            <h3 style="margin:0 0 8px;">${isSpanish ? "Conoce Pin AI, el asistente de tu estadía" : "Meet Pin AI, your stay assistant"}</h3>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Tu alojamiento tiene Pin AI activo. Abre Administrar reservación y busca el chat de Pin AI. Puedes usar este asistente de inteligencia artificial desde el navegador, sin instalar una app, y escribir en español o inglés."
+              : "Your accommodation has Pin AI enabled. Open Manage reservation and find the Pin AI chat. You can use this AI assistant in your browser without installing an app, and write in English or Spanish."}</p>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Puedes preguntar cómo acceder al alojamiento, cómo conectarte al Wi-Fi o qué hacer si la televisión no funciona. También puedes consultar si es posible solicitar una salida más tarde. Las respuestas dependen de la información proporcionada por el anfitrión."
+              : "You can ask how to access the accommodation, how to connect to Wi-Fi, or what to do if the TV is not working. You can also ask whether a later checkout can be requested. Answers depend on information supplied by the host."}</p>
+            <p style="margin:0 0 10px;">${isSpanish
+              ? "Si reportas un problema, revisa la respuesta y las actualizaciones para saber si se ha avisado al anfitrión. Pin AI está disponible desde 24 horas antes de la entrada hasta 24 horas después de la salida. Si no aparece o necesitas ayuda fuera de ese período, utiliza el contacto de esta confirmación."
+              : "If you report a problem, check the reply and updates to see whether the host has been notified. Pin AI is available from 24 hours before check-in until 24 hours after checkout. If it does not appear or you need help outside that period, use the contact in this confirmation."}</p>
+            <p style="margin:0;font-size:13px;color:#475569;">${isSpanish
+              ? "Tu enlace de reservación es privado. Evita compartirlo."
+              : "Your reservation link is private. Avoid sharing it."}</p>
+          </div>
+          ` : ""}
+          ` : ""}
+
+          ${manageReservationBlock ? `
+<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:20px;margin:20px 0;color:#1e3a8a;">
+<h2 style="margin:0 0 10px;">${isSpanish ? "Tu estadía en Pin&amp;Go Guest" : "Your stay in Pin&amp;Go Guest"}</h2>
+<p>${isSpanish ? "Lleva tu reservación y tus datos de acceso en el teléfono. También puedes abrir la cerradura por Bluetooth desde la app durante el horario autorizado de tu estadía." : "Keep your reservation and access details on your phone. You can also unlock the door via Bluetooth from the app during your authorized stay window."}</p>
+<h3>${isSpanish ? "1. Descarga la app para tu teléfono" : "1. Download the app for your phone"}</h3>
+<p>${isSpanish ? "Elige solo el enlace que corresponde a tu teléfono: App Store para iPhone o Google Play para Android. Instala Pin&amp;Go Guest y luego vuelve a este correo en ese mismo teléfono. Si ya la tienes instalada, pasa al paso 2." : "Choose the link for your phone: App Store for iPhone or Google Play for Android. Install Pin&amp;Go Guest, then return to this email on that same phone. If it is already installed, go to step 2."}</p>
+<p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#1d4ed8;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">${isSpanish ? "iPhone · Descargar en App Store" : "iPhone \u00b7 Download on the App Store"}</a></p>
+<p><a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer" style="display:inline-block;background:#1d4ed8;color:#ffffff;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:700;">${isSpanish ? "Android · Descargar en Google Play" : "Android \u00b7 Download on Google Play"}</a></p>
+<h3>${isSpanish ? "2. Vincula tu reservación" : "2. Link your reservation"}</h3>
+<p>${isSpanish ? "En ese mismo teléfono, abre el enlace de registro o acceso de tu reservación y selecciona «Usar Pin&amp;Go Guest». Puedes usar el enlace de registro de este correo o el enlace del correo de acceso cuando lo recibas." : "On that same phone, open your reservation\u2019s registration or access link and select \u201cUse Pin&amp;Go Guest\u201d. Use the registration link in this email or the link in your access email when you receive it."}</p>
+<p>${isSpanish ? "Solicita el código de verificación que enviaremos al email de tu reservación. Escríbelo en la página para confirmar tu dispositivo y pulsa «Abrir en Pin&amp;Go Guest». Tu estadía quedará vinculada a la app. Este código de verificación no es el PIN de la cerradura." : "Request the verification code we will send to your reservation email. Enter it on the page to confirm your device, then tap \u201cOpen in Pin&amp;Go Guest\u201d. Your stay will be linked to the app. This verification code is not the door PIN."}</p>
+<h3>${isSpanish ? "3. Abre la cerradura por Bluetooth" : "3. Unlock via Bluetooth"}</h3>
+<ol style="padding-left:22px;">
+<li style="margin-bottom:8px;">${isSpanish ? "Al llegar al alojamiento, abre la app y entra en Access (Acceso)." : "When you arrive at the accommodation, open the app and go to Access."}</li>
+<li style="margin-bottom:8px;">${isSpanish ? "Activa Bluetooth en tu teléfono y concede los permisos que solicite la app para comunicarse con la cerradura. Mantén conexión a internet para que la app valide tu acceso." : "Turn on Bluetooth on your phone and allow the permissions the app requests to communicate with the lock. Keep an internet connection so the app can validate your access."}</li>
+<li style="margin-bottom:8px;">${isSpanish ? "Acércate a la cerradura y pulsa «Abrir con Bluetooth» en Access (Acceso). La app prepara tu llave automáticamente; no tienes que seleccionarla." : "Stand near the lock and tap «Unlock with Bluetooth» in Access. The app prepares your key automatically; you do not need to select one."}</li>
+</ol>
+<p><strong>${isSpanish ? "Para abrir, tu reservación debe estar vinculada, los requisitos de registro solicitados deben estar completos y tu acceso debe estar liberado y dentro del horario autorizado. Instalar o vincular la app no adelanta la hora de entrada." : "To unlock, your reservation must be linked, any requested registration requirements must be complete, and your access must be released and within its authorized window. Installing or linking the app does not allow an earlier check-in."}</strong></p>
+<p>${isSpanish ? "Si el botón aún no aparece o no puedes abrir, consulta el código y las instrucciones de acceso de tu reservación. Si necesitas ayuda, utiliza el contacto del anfitrión indicado en este correo." : "If the button is not visible yet or you cannot unlock, check your reservation\u2019s access code and entry instructions. If you need help, use the host contact provided in this email."}</p>
+<p>${isSpanish ? "Dentro de la app: Stay muestra tu reservación; Access, tus credenciales y horarios de acceso; Help, las opciones de ayuda." : "In the app: Stay shows your reservation; Access shows your credentials and entry times; Help provides assistance options."}</p>
+<p style="font-size:13px;margin-bottom:0;">${isSpanish ? "La app es opcional: también puedes continuar desde el navegador. Guarda este correo y vuelve al enlace de tu reservación si necesitas vincularla de nuevo. No compartas tus enlaces privados, códigos de verificación ni credenciales de acceso." : "The app is optional: you can also continue in your browser. Keep this email and return to your reservation link if you need to link it again. Do not share private links, verification codes, or access credentials."}</p>
+</div>
+          ` : ""}
 
           ${cancellationPolicyBlock}
 

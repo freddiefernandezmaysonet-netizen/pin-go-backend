@@ -1,3 +1,4 @@
+import { unmaskChannexContact, preserveChannexMaskedBooking } from "./ota-masked-booking.policy";
 import { capturePinAIReservationService } from "../pin-ai/reservation-service-evidence.js";
 ﻿import {
   PrismaClient,
@@ -945,6 +946,10 @@ async function upsertReservation(
     guestTokenExpiresAt: Date;
   }
 ): Promise<{ reservation: any; didChange: boolean }> {
+  if (String(input.externalProvider ?? "").toUpperCase() === "CHANNEX") {
+    input = { ...input, guestEmail: unmaskChannexContact(input.guestEmail),
+      guestPhone: unmaskChannexContact(input.guestPhone) };
+  }
  const ingestKey = buildIngestKey({
   source: input.source,
   propertyId: input.propertyId,
@@ -969,7 +974,7 @@ async function upsertReservation(
           externalId: input.externalId!,
         },
       },
-      select: { id: true, externalUpdatedAt: true, guestEmail: true, guestPhone: true },
+      select: { id: true, externalUpdatedAt: true, guestEmail: true, guestPhone: true, externalRaw: true },
     });
 
     function isOlderOrSame(incoming?: Date | null, current?: Date | null) {
@@ -1029,7 +1034,7 @@ async function upsertReservation(
           where: { id: existingByPms.id },
           data: {
             externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-            externalRaw: input.externalRaw ?? undefined,
+            externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw, existingByPms?.externalRaw) ?? undefined,
             lastIngestError: "CANCEL_REJECTED_ACTIVE_STAY",
             lastIngestedAt: new Date(),
           },
@@ -1061,7 +1066,7 @@ async function upsertReservation(
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-          externalRaw: input.externalRaw ?? undefined,
+          externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw, existingByPms?.externalRaw) ?? undefined,
           status: input.status
             ? input.status === "CANCELLED"
               ? ReservationStatus.CANCELLED
@@ -1085,7 +1090,7 @@ async function upsertReservation(
 
     const existingByIngestKey = await tx.reservation.findUnique({
       where: { ingestKey },
-      select: { id: true, guestEmail: true, guestPhone: true },
+      select: { id: true, guestEmail: true, guestPhone: true, externalRaw: true },
     });
 
     if (existingByIngestKey) {
@@ -1114,7 +1119,7 @@ async function upsertReservation(
           roomName: input.roomName ?? null,
 
           externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-          externalRaw: input.externalRaw ?? undefined,
+          externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw, existingByIngestKey.externalRaw) ?? undefined,
           status: input.status
             ? input.status === "CANCELLED"
               ? ReservationStatus.CANCELLED
@@ -1159,7 +1164,7 @@ async function upsertReservation(
         externalProvider: input.externalProvider!,
         externalId: input.externalId!,
         externalUpdatedAt: input.externalUpdatedAt ?? null,
-        externalRaw: input.externalRaw ?? undefined,
+        externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw) ?? undefined,
         status:
           input.status === "CANCELLED"
             ? ReservationStatus.CANCELLED
@@ -1202,7 +1207,7 @@ async function upsertReservation(
       externalProvider: input.externalProvider ?? null,
       externalId: input.externalId ?? null,
       externalUpdatedAt: input.externalUpdatedAt ?? null,
-      externalRaw: input.externalRaw ?? undefined,
+      externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw) ?? undefined,
       status:
         input.status === "CANCELLED"
           ? ReservationStatus.CANCELLED
@@ -1229,7 +1234,7 @@ async function upsertReservation(
       roomName: input.roomName ?? null,
 
       externalUpdatedAt: input.externalUpdatedAt ?? undefined,
-      externalRaw: input.externalRaw ?? undefined,
+      externalRaw: preserveChannexMaskedBooking(input.externalProvider, input.externalRaw) ?? undefined,
       status: input.status
         ? input.status === "CANCELLED"
           ? ReservationStatus.CANCELLED

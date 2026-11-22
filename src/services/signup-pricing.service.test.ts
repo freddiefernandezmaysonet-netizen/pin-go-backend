@@ -21,3 +21,9 @@ test('Stripe price must match active USD monthly licensed amount; never accepts 
  assert.doesNotThrow(()=>assertMonthlyPrice(good,7499));
  for(const change of [{tax_behavior:'inclusive'},{tax_behavior:'unspecified'},{active:false},{currency:'eur'},{unit_amount:6499},{transform_quantity:{divide_by:2}},{recurring:{interval:'year',interval_count:1,usage_type:'licensed'}},{recurring:{interval:'month',interval_count:12,usage_type:'licensed'}}])assert.throws(()=>assertMonthlyPrice({...good,...change},7499),/SUBSCRIPTION_PRICE_MISMATCH/);
 });
+
+test("legacy prices remain recognizable for existing subscriptions without being offered at signup",()=>{
+ const env={STRIPE_PRICE_HAAS_PRO_24_MONTHLY:"price_new",STRIPE_PRICE_HAAS_LEGACY_IDS:"price_old, price_older"};
+ assert.deepEqual(haasPriceIds(env),["price_new","price_old","price_older"]);
+ assert.equal(resolveHaasPrice({plan:"haas",lock:"pro",termMonths:24},1,"monthly",env)?.priceId,"price_new");
+});

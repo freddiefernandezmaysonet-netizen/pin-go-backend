@@ -84,6 +84,7 @@ if (role === "api") {
         console.log("GJ_LAB_COMMUNICATIONS_CYCLE", JSON.stringify(await runtime.runCommunicationsProbe()));
         console.log("GJ_LAB_COMMUNICATIONS_RECOVERY", JSON.stringify(await runtime.runRecoveryProbe()));
         console.log("GJ_LAB_PRECHECKIN_SHADOW", JSON.stringify(await runtime.runPrecheckinShadowProbe()));
+        console.log("GJ_LAB_PRECHECKIN_FIRST_SEND", JSON.stringify(await runtime.runPrecheckinFirstSendProbe()));
       } else {
         const evidence = await runtime.readLabEvidence();
         await runtime.heartbeat("monitor", {

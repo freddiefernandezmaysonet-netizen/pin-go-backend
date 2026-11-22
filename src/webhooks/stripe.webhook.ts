@@ -1,5 +1,6 @@
 import { haasPriceIds } from "../services/signup-pricing.service.js";
 import { recordHaasPayment } from "../services/haas-admin.service.js";
+import { persistSubscriptionWithGrace } from "../services/subscription-grace.service.js";
 import type { Express, Request, Response } from "express";
 import bodyParser from "body-parser";
 import Stripe from "stripe";
@@ -173,6 +174,7 @@ export function registerStripeWebhook(app: Express) {
             if (session.subscription) {
               await safeSyncBySubscriptionId(String(session.subscription), {
                 source: "checkout.session.completed",
+                observedAt: new Date(event.created * 1000),
                 session,
               });
             }
@@ -187,7 +189,7 @@ export function registerStripeWebhook(app: Express) {
             if (session.metadata?.pendingSignupId && session.metadata.haasPlan === "haas" && session.payment_status === "paid") {
               await maybeCompleteSignupOnboarding(session);
               await recordHaasPayment(prisma, session, new Date(event.created * 1000));
-              if (session.subscription) await safeSyncBySubscriptionId(String(session.subscription), { source: event.type, session });
+              if (session.subscription) await safeSyncBySubscriptionId(String(session.subscription), { source: event.type, session, observedAt: new Date(event.created * 1000) });
               break;
             }
 
@@ -268,6 +270,7 @@ export function registerStripeWebhook(app: Express) {
 
             await safeSyncBySubscriptionId(sub.id, {
               source: event.type,
+              observedAt: new Date(event.created * 1000),
             });
 
             break;
@@ -397,7 +400,7 @@ export function registerStripeWebhook(app: Express) {
   );
 }
 
-async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session) {
+export async function maybeCompleteSignupOnboarding(session: Stripe.Checkout.Session, db: PrismaClient = prisma) {
  const metadata = session.metadata ?? {};
 const flow = String(metadata.flow ?? "").trim();
 const pendingSignupId = String(metadata.pendingSignupId ?? "").trim();
@@ -415,7 +418,11 @@ if (!isSignupOnboarding) {
     return;
   }
 
-  const pending = await prisma.pendingSignup.findUnique({
+  await db.$transaction(async (tx) => {
+    // Different Stripe events for the same checkout have different ledger IDs.
+    // Serialize the signup itself and re-read completion under the row lock.
+    await tx.$queryRaw`SELECT "id" FROM "PendingSignup" WHERE "id" = ${pendingSignupId} FOR UPDATE`;
+    const pending = await tx.pendingSignup.findUnique({
     where: { id: pendingSignupId },
   });
 
@@ -429,7 +436,7 @@ if (!isSignupOnboarding) {
 
   if (pending.status === PendingSignupStatus.COMPLETED && pending.organizationId) {
     // Igual actualizamos IDs Stripe por si faltan
-    await prisma.pendingSignup.update({
+    await tx.pendingSignup.update({
       where: { id: pending.id },
       data: {
         stripeCustomerId: session.customer
@@ -444,7 +451,6 @@ if (!isSignupOnboarding) {
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
     let organizationId = pending.organizationId ?? null;
 
     if (!organizationId) {
@@ -510,12 +516,13 @@ if (!isSignupOnboarding) {
 
 type SyncContext = {
   source: string;
+  observedAt: Date;
   session?: Stripe.Checkout.Session;
 };
 
 async function safeSyncBySubscriptionId(
   subscriptionId: string,
-  context?: SyncContext
+  context: SyncContext
 ) {
   const fullSub = await stripe.subscriptions.retrieve(subscriptionId, {
     expand: ["items.data.price"],
@@ -686,7 +693,7 @@ for (const item of items) {
   const entitledSmartProperties =
     status === "ACTIVE" || status === "TRIALING" ? smartQty : 0;
 
-  await prisma.subscription.upsert({
+  await persistSubscriptionWithGrace(prisma, {
     where: { organizationId },
     create: {
       organizationId,
@@ -723,7 +730,7 @@ for (const item of items) {
         ? new Date(fullSub.current_period_end * 1000)
         : null,
     },
-  });
+  }, context.observedAt);
 
   console.log("✅ Stripe subscription synced", {
     source: context?.source ?? "unknown",

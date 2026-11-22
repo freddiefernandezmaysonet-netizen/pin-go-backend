@@ -93,7 +93,7 @@ or complete. Every row exposes `receipt=NOT_CERTIFIED`, `claim=NOT_CREATED` and
 
 | Reservation/event | Shadow obligation | Canonical owner | Current gap / boundary |
 | --- | --- | --- | --- |
-| Paid Direct Booking, four-hour window | Separate email and eligible SMS | Communications | Initial outbox + REQUEST_COMMUNICATION still need implementation |
+| Paid Direct Booking, four-hour window | Separate email and eligible SMS | Communications | First-send lab probe below; production ownership gate remains open |
 | Consent absent, then eligible | Email remains separate from SMS | Communications | Consent must never reset effect identity or consume another channel |
 | During stay | Pending SMS; no new pre-arrival email for an older booking | Communications | E7 currently retires PRECHECKIN at check-in; legacy permits SMS catch-up |
 | Booking created after check-in | Email and eligible SMS | Communications | Same E7 time-window mismatch |
@@ -110,9 +110,9 @@ and `guest-journey-communications-delivery-adapter.service.ts`. The established 
 pre-check-in tests run alongside 10 shadow policy tests and the real PostgreSQL certification.
 This increment changes no production entry point or legacy sender.
 
-Next gate: implement and certify the first-send outbox for Direct Booking using the validated
-eligibility/content contracts, then close the E7 arrival-window mismatch, delivery completion and
-shared legacy/GJ ownership fence before any external canary. Reservation changes, confirmation,
+Next gate: certify the shared legacy/GJ ownership fence before any external canary. The dedicated
+first-send lab probe below opts into corrected arrival eligibility and receipt-gated completion;
+the default production composition still does not enable this contract. Reservation changes, confirmation,
 payment, identity/contract, access, Pin&Go Guest, cleaner/reminders, cancellation and checkout still
 require their own event-to-obligation certification. This probe does not establish full parity.
 
@@ -120,6 +120,53 @@ Rollback of this laboratory increment: pin API and both workers back to the prev
 lab commit (`c5a9268150a4d26c83d24d49923b03e403f07380`). Retain the additive shadow table and
 fixture history; no data deletion or production configuration change is needed. A failed shadow
 cycle is logged as `GJ_LAB_CYCLE_FAILED`; inspect the lab heartbeat and CI evidence before retrying.
+
+## Direct Booking first-send simulation
+
+The branch incorporates current `main` contracts before this increment, including the current
+pre-check-in return-booking link and email templates. No main deployment is included.
+`precheckinFirstSend` exposes a separate property with nine synthetic reservations and a clock
+fixed at fixture creation. Seven start without communications; two carry legacy email or uncertain
+SMS evidence. The producer uses the existing language, map, verification and SMS content helpers.
+The default email adapter retains current main's delivery-time direct-booking link resolver.
+
+The guarded lab producer commits the message outbox, normalized canonical REQUEST_COMMUNICATION
+intent and materialization audit in one transaction. A failed audit rolls everything back.
+Reservation-scoped advisory locking and deterministic per-channel message IDs prevent concurrent
+or repeated creation. Existing message or dispatch evidence is preserved regardless of result.
+The producer never invokes the general E4 supersession pass when adding another channel, so late
+SMS consent cannot supersede a pending email. General E4 coexistence is not certified by this probe.
+
+E7 is called with `firstSendContract=PRECHECKIN_DELIVERY_V1` only for this property. It checks native
+Direct Booking provenance, payment, active status, cancellation, consent and the distinct email/SMS
+windows both before fencing and immediately before dispatch. SMS catch-up during the stay is allowed;
+email catch-up requires a booking created after check-in, matching legacy eligibility. Acceptance
+retains E7_SENDING and WAITING_FOR_EVIDENCE. A separate simulated DELIVERED callback and the real receipt
+reconciler close the intent and resolve its operational alert. No production caller opts into this mode.
+
+| Synthetic event | Intent / owner / lease | Effect and receipt | Recovery and durable evidence |
+| --- | --- | --- | --- |
+| Before arrival | Two canonical intents; Communications; one claim each | Email + SMS; simulated Resend/Twilio DELIVERED | Two immutable materializations and receipt recoveries |
+| During stay, older booking | SMS intent only | Arrival-details SMS, without “check-in today” | Same receipt closure; no new pre-arrival email |
+| Booking created after arrival | Email + SMS intents | Both delivered by simulators | One attempt per channel |
+| Consent arrives after email acceptance | Existing email preserved; new SMS intent | No email resend | Original pending email intent and claim unchanged |
+| Consent withdrawn after materialization | SMS stays WAITING_FOR_EVIDENCE, APMS_PENDING | Zero SMS provider calls | HOST ACTION_REQUIRED; no blind rearming |
+| Prior legacy email / uncertain SMS | Preserve prior effect; create only missing channel | No replay of uncertain legacy SMS | Existing rows remain visible, not marked delivered |
+| OTA / cancellation | No new intents | No external fallback or delivery | Existing canonical owner and eligibility boundary preserved |
+| Audit write failure | Transaction rolls back | No orphan message or executable intent | Integration test checks both tables |
+| Repeat / concurrent creation / reconnect / restart | Stable effect and intent identities | No additional calls | Identical evidence and claim counts |
+
+After late consent is exercised: 11 materialized intents, 11 attempts, 10 simulator calls and 10
+confirmed simulated receipts; one withdrawn-consent SMS remains visibly pending. Twelve MessageLog
+rows include the deliberately uncertain prior SMS. Every intent retains claimCount=1. These are
+simulation-only counts, not a claim of real delivery. The unchanged earlier six-outbox probe and
+25-observation shadow probe remain separate.
+
+Remaining limits: production coexistence with legacy/general E4 requires a shared ownership gate;
+reactivation after a pre-provider eligibility block, mutable-content reconciliation, real-time
+scheduling, physical email/SMS delivery and the full lifecycle are not certified. Do not enable
+the production first-send composition based on these results. Roll back this increment by pinning
+the three lab applications to `d1000a3b07d39eb6a3ae81a7ceb5eb7d4c66e54b`, preserving fixture history.
 
 ## Receipt recovery boundary
 

@@ -1,0 +1,30 @@
+name: Subscription grace and recovery
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/services/subscription-grace*'
+      - 'src/services/billing.entitlement.ts'
+      - 'src/webhooks/stripe.webhook.ts'
+      - '.github/workflows/subscription-grace.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: postgresql://fixture:fixture@localhost:5432/fixture
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx prisma generate
+      - run: node --import tsx --test src/services/subscription-grace.service.test.ts src/webhooks/stripe-production-log-hygiene.contract.test.ts
+      - run: npx tsc --noEmit --strict --skipLibCheck --esModuleInterop --module ESNext --moduleResolution Bundler --target ES2022 src/services/subscription-grace.service.ts src/services/subscription-grace.service.test.ts src/services/billing.entitlement.ts
+      - run: node --input-type=module -e "import {build} from 'esbuild'; await build({entryPoints:['src/server.ts'],bundle:true,platform:'node',format:'esm',packages:'external',outfile:'/tmp/pingo-server.mjs'});"

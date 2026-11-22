@@ -1,9 +1,11 @@
+import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
 import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.policy";
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { createHash } from "node:crypto";
+import { firstPrecheckinBlockReason } from "./guest-journey-communications-precheckin.policy";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
 
@@ -154,6 +156,7 @@ async function defaultSendEmail(input: {
         select: { complexName: true, unitNumber: true },
       });
       return sendGuestPreCheckinEmail({
+        directBookingUrl: await resolvePrecheckinDirectBookingUrl(input.prisma, input.reservationId),
         arrivalLocation: formatPropertyArrivalLocation(arrivalProperty ?? {}, clean(payload.preferredLanguage)),
         to: input.to,
         replyTo: replyTo.email,
@@ -261,6 +264,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   options: {
     now?: Date;
     providerTimeoutMs?: number;
+    // Isolated first-send certification opts into delivery evidence and legacy
+    // pre-check-in eligibility. Production composition does not enable this yet.
+    firstSendContract?: "PRECHECKIN_DELIVERY_V1";
   } = {},
   dependencies: DeliveryDependencies = DEFAULT_DEPENDENCIES
 ): Promise<CommunicationDeliveryAdapterResult> {
@@ -272,6 +278,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   }
 
   const now = new Date(options.now ?? new Date());
+  const firstSend = options.firstSendContract === "PRECHECKIN_DELIVERY_V1";
   if (Number.isNaN(now.getTime())) {
     throw new Error("GUEST_JOURNEY_COMMUNICATIONS_ADAPTER_NOW_INVALID");
   }
@@ -307,6 +314,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       },
       select: {
         status: true,
+        paymentState: true,
+        createdAt: true,
+        externalRaw: true,
         source: true,
         externalProvider: true,
         externalId: true,
@@ -343,6 +353,22 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw new Error("COMMUNICATION_SCOPE_OR_MESSAGE_MISMATCH");
   }
 
+  if (firstSend && (requestedType !== "PRECHECKIN" || claim.intentType !== "REQUEST_COMMUNICATION")) {
+    throw new Error("COMMUNICATION_FIRST_SEND_CONTRACT_MISMATCH");
+  }
+  const pendingReceipt = (providerCalls: 0 | 1, reason: string): CommunicationDeliveryAdapterResult => ({
+    providerCalls,
+    completion: {
+      kind: "WAITING_FOR_EVIDENCE", messageLogId, communicationType: requestedType, channel: requestedChannel,
+      outcomeEvidenceFingerprint: hashEvidence({ messageLogId, reason }),
+      errorCode: reason, errorDetail: "First-send completion requires current eligibility and a correlated delivery receipt; no blind replay.",
+    },
+  });
+  if (firstSend) {
+    const blocked = firstPrecheckinBlockReason(reservation, requestedChannel as "email" | "sms", now);
+    if (blocked) return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
+  }
+
   // A guest OTA's operational email/SMS belongs to Channex. This fence also
   // retires pre-existing E7 queues; never send them through Twilio/Resend.
   const otaOperationalType = ["PRECHECKIN", "CHECKOUT", "GUEST_ACCESS_PASSCODE"].includes(requestedType);
@@ -370,6 +396,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   }
 
   if (message.status === "SENT") {
+    if (firstSend) return pendingReceipt(0, "COMMUNICATION_DELIVERY_RECEIPT_REQUIRED");
     return {
       providerCalls: 0,
       completion: {
@@ -456,7 +483,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     (!reservationCancelled && cancellationMessage) ||
     !datesMatch(retryPayload.checkIn, reservation.checkIn) ||
     !datesMatch(retryPayload.checkOut, reservation.checkOut) ||
-    (requestedType === "PRECHECKIN" && now >= reservation.checkIn) ||
+    (requestedType === "PRECHECKIN" && now >= reservation.checkIn && !firstSend) ||
     (requestedType === "CHECKOUT" && now < reservation.checkOut);
 
   if (obsolete) {
@@ -512,6 +539,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
     select: {
       status: true,
+      paymentState: true,
+      createdAt: true,
+      externalRaw: true,
       source: true,
       externalProvider: true,
       externalId: true,
@@ -528,6 +558,15 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       data: { status: "FAILED", error: "Tenant canary changed before provider call" },
     });
     throw new Error("COMMUNICATION_CANARY_CHANGED_BEFORE_SEND");
+  }
+  if (firstSend) {
+    const blocked = firstPrecheckinBlockReason(currentReservation, requestedChannel as "email" | "sms", now);
+    if (blocked) {
+      const restored = await prisma.messageLog.updateMany({ where: { id: message.id, status: "E7_SENDING" },
+        data: { status: "APMS_PENDING", error: `COMMUNICATION_FIRST_SEND_${blocked}` } });
+      if (restored.count !== 1) throw new Error("COMMUNICATION_FIRST_SEND_FENCE_LOST");
+      return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
+    }
   }
   const currentCancelled =
     currentReservation.status === ReservationStatus.CANCELLED ||
@@ -725,7 +764,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   const persisted = await prisma.messageLog.updateMany({
     where: { id: message.id, status: "E7_SENDING" },
     data: {
-      status: "SENT",
+      status: firstSend ? "E7_SENDING" : "SENT",
       providerMessageId,
       retryCount: { increment: 1 },
       error: null,
@@ -734,6 +773,8 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   if (persisted.count !== 1) {
     throw new Error("COMMUNICATION_DELIVERY_RESULT_PERSISTENCE_LOST");
   }
+
+  if (firstSend) return pendingReceipt(1, "COMMUNICATION_DELIVERY_RECEIPT_REQUIRED");
 
   return {
     providerCalls: 1,

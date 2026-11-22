@@ -22,6 +22,10 @@ function verificationPage(token: string, secret: string, es: boolean, challengeI
   return `<!doctype html><html lang="${es ? "es" : "en"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>Pin&amp;Go Guest</title>
   <style>body{margin:0;background:#0b1220;color:#e7eefc;font:17px/1.5 system-ui,sans-serif}main{max-width:520px;margin:auto;padding:40px 24px}p{color:#c1cde1}button,input{box-sizing:border-box;width:100%;padding:16px;border-radius:12px;font:inherit;margin:12px 0}button{background:#2563eb;color:white;border:0;font-weight:700}a{color:#9ec5ff}input{border:1px solid #64748b}button:focus-visible,input:focus-visible{outline:3px solid #fbbf24}</style></head><body><main>
   <h1>${es ? "Vincula tu estadía" : "Link your stay"}</h1>
+  <h2>Pin&amp;Go Guest</h2>
+  <p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para iPhone" : "Download Pin&amp;Go Guest for iPhone"}</a></p>
+<p><a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para Android" : "Download Pin&amp;Go Guest for Android"}</a></p>
+  <p>${es ? "Descarga Pin&Go Guest para iPhone o Android antes de vincular tu reservación. Si ya tienes la app instalada, continúa desde este mismo teléfono. También puedes continuar en el navegador." : "Download Pin&Go Guest for iPhone or Android before linking your reservation. If the app is already installed, continue from this same phone. You can also continue in your browser."}</p>
   <p>${challengeId ? (es ? `Enviamos un código de verificación a ${destinationEs}. Escríbelo aquí para autorizar este dispositivo.` : `We sent a verification code to ${destinationEn}. Enter it here to authorize this device.`) : (es ? `Para proteger tu acceso, confirma la vinculación con un código que recibirás en ${destinationEs}.` : `To protect your access, confirm linking with a code sent to ${destinationEn}.`)}</p>
   ${notice ? `<p role="alert">${notice}</p>` : ""}
   <form method="post" action="/guest/app/${token}/${challengeId ? "verify" : "request"}">
@@ -39,6 +43,8 @@ export function renderGuestAppEntry(token: string, preferredLanguage?: string | 
   if (!STAY_TOKEN.test(token)) return "";
   const es = /^es(?:-|$)/i.test(preferredLanguage ?? "");
   return `<div class="card">
+    <p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para iPhone" : "Download Pin&amp;Go Guest for iPhone"}</a></p>
+<p><a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para Android" : "Download Pin&amp;Go Guest for Android"}</a></p>
     <p><a class="link" href="/guest/app/${token}">${es ? "Usar Pin&amp;Go Guest" : "Use Pin&amp;Go Guest"}</a></p>
     <p class="muted small">${es ? "La app es opcional. También puedes continuar en el navegador, sin recibir SMS." : "The app is optional. You can also continue in your browser without receiving SMS."}</p>
   </div>`;
@@ -64,7 +70,10 @@ function renderHandoff(token: string, preferredLanguage: string | null, browserT
 <body><main>
   <h1>${es ? "Tu estancia en Pin&amp;Go Guest" : "Your stay in Pin&amp;Go Guest"}</h1>
   <p>${es ? "Si tienes la app instalada en este dispositivo, abre tu reserva con este botón." : "If the app is installed on this device, open your reservation using this button."}</p>
+  <p><a href="https://apps.apple.com/app/id6823247069" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para iPhone" : "Download Pin&amp;Go Guest for iPhone"}</a></p>
+<p><a href="https://play.google.com/store/apps/details?id=com.pingo.guest" target="_blank" rel="noopener noreferrer">${es ? "Descargar Pin&amp;Go Guest para Android" : "Download Pin&amp;Go Guest for Android"}</a></p>
   <a class="primary" href="pingo-guest://stay/${token}">${es ? "Abrir en Pin&amp;Go Guest" : "Open in Pin&amp;Go Guest"}</a>
+  <p>${es ? "En Stay consulta tu reservación; en Access revisa tus credenciales y el horario autorizado; en Help busca ayuda. Para abrir, activa Bluetooth, concede los permisos solicitados, mantén conexión a internet y acércate a la cerradura. En Access pulsa «Abrir con Bluetooth»; la app prepara tu llave automáticamente. Tu reservación debe estar vinculada y el acceso liberado y dentro del horario autorizado." : "Use Stay to review your reservation, Access to check credentials and authorized times, and Help for assistance. To unlock, turn on Bluetooth, allow requested permissions, keep an internet connection, and stand near the lock. In Access, tap «Unlock with Bluetooth»; the app prepares your key automatically. Your reservation must be linked and access must be released and within its authorized window."}</p>
   ${browserToken !== token ? `<p>${es ? "Dispositivo confirmado. Este pase de activación vence en dos minutos y solo puede usarse una vez. Si vence, vuelve al enlace del mensaje para solicitar otra verificación." : "Device confirmed. This activation pass expires in two minutes and can only be used once. If it expires, return to your message link to request another verification."}</p>` : ""}
   <p>${es ? "Si la app no abre o no está instalada, continúa en el navegador. No necesitas recibir SMS. Si instalas la app, vuelve a abrir este mismo enlace para vincular tu reservación. Guarda este mensaje para volver a entrar." : "If the app does not open or is not installed, continue in your browser. You do not need to receive SMS. After installing the app, open this same link again to link your reservation. Keep this message to return to your stay."}</p>
   <a href="/guest/verify/${browserToken}">${es ? "Continuar en el navegador" : "Continue in browser"}</a>

@@ -146,3 +146,67 @@ test("reservation snapshots produce durable pre-check-in shadow obligations with
   assert.equal(await messageCount(), 1);
   assert.equal((await shadow.readPrecheckinShadow(lab.prisma, "unrelated_revision")).observations.length, 0);
 });
+
+test("first-send commits outbox plus intent atomically and certifies simulated delivery without consuming another channel", async () => {
+  const producer = await import("./precheckin-first-send");
+  const probe = await import("./precheckin-first-send.runtime");
+  await lab.seedLabFixtures();
+  const revision = lab.fixtureRevision;
+  const scope = producer.firstSendScope(revision);
+  const id = (scenario: string) => producer.firstSendReservationId(revision, scenario);
+  const property = await lab.prisma.property.findUniqueOrThrow({ where: { id: scope.propertyId } });
+  await assert.rejects(producer.materializeFirstPrecheckin(lab.prisma, revision, "other-reservation", property.createdAt), /SCOPE_MISMATCH/);
+  const initial = await probe.readFirstSendEvidence(lab.prisma, revision);
+  if (initial.intents.length === 0) {
+    assert.equal(initial.messages.length, 1, "only the deliberately uncertain legacy SMS is seeded");
+    await assert.rejects(producer.materializeFirstPrecheckin(lab.prisma, revision, id("before_arrival"), property.createdAt,
+      { persistAudit: async () => { throw Error("FIRST_SEND_AUDIT_FAILURE"); } }), /FIRST_SEND_AUDIT_FAILURE/);
+    assert.equal(await lab.prisma.messageLog.count({ where: { ...scope, reservationId: id("before_arrival") } }), 0);
+    assert.equal(await lab.prisma.guestJourneyCoordinationIntent.count({ where: { reservationId: id("before_arrival") } }), 0);
+    const race = await Promise.all([
+      producer.materializeFirstPrecheckin(lab.prisma, revision, id("before_arrival"), property.createdAt),
+      producer.materializeFirstPrecheckin(lab.prisma, revision, id("before_arrival"), property.createdAt),
+    ]);
+    assert.equal(race.flat().filter(row => row.action === "CREATED").length, 2);
+    await probe.materializeFirstSendFixtures(lab.prisma, revision);
+    const dispatch = await probe.dispatchFirstSend(lab.prisma, revision);
+    assert.equal(dispatch.errors, 0);
+    const pending = await probe.readFirstSendEvidence(lab.prisma, revision);
+    assert.equal(pending.intents.length, 10);
+    assert.ok(pending.intents.every(row => row.status === "WAITING_FOR_EVIDENCE"));
+    assert.equal(pending.calls.length, 9);
+    assert.equal(pending.messages.filter(row => row.providerDeliveryStatus === "DELIVERED").length, 0);
+    const emailIntent = pending.intents.find(row => row.reservationId === id("late_consent"))!;
+    await probe.advanceFirstSendConsent(lab.prisma, revision);
+    await producer.materializeFirstPrecheckin(lab.prisma, revision, id("late_consent"), property.createdAt);
+    const withSms = await probe.readFirstSendEvidence(lab.prisma, revision);
+    assert.deepEqual(withSms.intents.find(row => row.id === emailIntent.id), emailIntent,
+      "creating the late SMS must not supersede or rearm the pending email");
+    assert.equal(withSms.intents.length, 11);
+    assert.equal((await probe.dispatchFirstSend(lab.prisma, revision)).errors, 0);
+    await probe.receiveFirstSendReceipts(lab.prisma, revision);
+  }
+  await probe.runFirstSendProbe(lab.prisma, revision);
+  const complete = await probe.readFirstSendEvidence(lab.prisma, revision);
+  assert.equal(complete.messages.length, 12);
+  assert.equal(complete.intents.length, 11);
+  assert.equal(complete.attempts.length, 11);
+  assert.equal(complete.calls.length, 10);
+  assert.ok(complete.calls.every(row => row.calls === 1));
+  assert.equal(complete.intents.filter(row => row.status === "SUCCEEDED").length, 10);
+  assert.equal(complete.intents.filter(row => row.status === "WAITING_FOR_EVIDENCE").length, 1);
+  assert.ok(complete.intents.every(row => row.claimCount === 1 && row.targetEngine === "COMMUNICATIONS"));
+  assert.equal(complete.messages.filter(row => row.providerDeliveryStatus === "DELIVERED").length, 10);
+  assert.equal(complete.audit.filter(row => row.reason === "PRECHECKIN_FIRST_SEND_MATERIALIZED").length, 11);
+  assert.equal(complete.audit.filter(row => row.reason === "COMMUNICATION_DELIVERY_RECEIPT_CONFIRMED").length, 10);
+  assert.equal(complete.issues.filter(row => row.workflowState === "ACTION_REQUIRED" && row.visibility === "HOST").length, 1);
+  assert.equal(complete.messages.filter(row => [id("ota"), id("cancelled")].includes(row.reservationId!)).length, 0);
+  const afterArrival = await lab.prisma.messageLog.findFirstOrThrow({ where: { ...scope, reservationId: id("after_arrival") } });
+  assert.match(afterArrival.body, /Informacion de llegada/);
+  assert.doesNotMatch(afterArrival.body, /Check-in hoy/);
+  await lab.prisma.$disconnect();
+  await lab.prisma.$connect();
+  await probe.seedFirstSend(lab.prisma, revision);
+  await probe.runFirstSendProbe(lab.prisma, revision);
+  assert.deepEqual(await probe.readFirstSendEvidence(lab.prisma, revision), complete);
+});

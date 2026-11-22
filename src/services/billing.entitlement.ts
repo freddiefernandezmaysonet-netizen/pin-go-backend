@@ -4,9 +4,7 @@ import { prisma } from "../lib/prisma";
 export async function isOrgEntitled(organizationId: string, now = new Date()) {
   const sub = await prisma.subscription.findUnique({
     where: { organizationId },
-    // ✅ graceUntil ya no existe en el schema actual
-    // ✅ usamos currentPeriodEnd como fallback de "grace"
-    select: { status: true, currentPeriodEnd: true },
+    select: { status: true, currentPeriodEnd: true, graceUntil: true },
   });
 
   // Sin suscripción = bloqueado (puedes cambiarlo si quieres "FREE")
@@ -17,10 +15,11 @@ export async function isOrgEntitled(organizationId: string, now = new Date()) {
     return { ok: true, reason: "ENTITLED" as const };
   }
 
-  // PAST_DUE: sin graceUntil, permitimos solo si aún no ha pasado el periodEnd
-  // (fallback seguro para no romper el worker)
+  // Existing rows without a verified grace deadline retain their previous
+  // behavior until the next subscription webhook sync; do not backdate them.
   if (sub.status === "PAST_DUE") {
-    const graceOk = !!sub.currentPeriodEnd && sub.currentPeriodEnd.getTime() >= now.getTime();
+    const deadline = sub.graceUntil ?? sub.currentPeriodEnd;
+    const graceOk = !!deadline && deadline.getTime() >= now.getTime();
     return graceOk
       ? { ok: true, reason: "GRACE" as const }
       : { ok: false, reason: "GRACE_EXPIRED" as const };

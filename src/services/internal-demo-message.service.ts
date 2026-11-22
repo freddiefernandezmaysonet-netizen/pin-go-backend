@@ -23,13 +23,14 @@ export async function sendInternalDemoMessage(input: Input) {
     attempted: true, ok: ["ACCEPTED", "DELIVERED"].includes(demoMessageState(row)),
     status: demoMessageState(row), to: input.to, messageId: id, providerMessageId: row.providerMessageId ?? null,
   });
-  try {
-    await input.prisma.messageLog.create({ data: { id, reservationId: input.reservationId,
+  // Only the caller that inserts the reservation may contact the provider.
+  // Expected replays must not raise unique-constraint errors in PostgreSQL.
+  const reserved = await input.prisma.messageLog.createMany({ skipDuplicates: true,
+    data: [{ id, reservationId: input.reservationId,
       propertyId: input.propertyId, organizationId: input.organizationId, channel: input.channel,
       to: input.to, body: input.body, provider: input.channel === "email" ? "resend" : "twilio",
-      communicationType: input.type, status: "DEMO_SENDING" } });
-  } catch (error: any) {
-    if (error?.code !== "P2002") throw error;
+      communicationType: input.type, status: "DEMO_SENDING" }] });
+  if (reserved.count === 0) {
     return result(await input.prisma.messageLog.findUniqueOrThrow({ where: { id } }));
   }
   try {

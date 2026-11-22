@@ -12,6 +12,7 @@ on:
       - "src/webhooks/stripe-direct-charge-dispute.contract.test.ts"
       - "src/routes/dashboard-payouts.routes.ts"
       - "src/routes/public-booking.metadata-limit.contract.test.ts"
+      - "src/services/direct-booking-attribution*"
       - "src/routes/dashboard.properties.route.ts"
       - "src/routes/direct-booking-publication-gate.contract.test.ts"
       - "src/services/stripe-connect-dashboard-link.service.ts"
@@ -80,6 +81,7 @@ jobs:
           src/services/stripe-financial-event-ledger.service.test.ts
           src/services/stripe-direct-charge-dispute.service.test.ts
           src/routes/public-booking.metadata-limit.contract.test.ts
+          src/services/direct-booking-attribution.test.ts
           src/routes/direct-booking-publication-gate.contract.test.ts
           src/webhooks/stripe-production-log-hygiene.contract.test.ts
           src/webhooks/stripe-direct-charge-dispute.contract.test.ts
