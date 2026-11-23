@@ -3845,3 +3845,23 @@ model DirectBookingPricingSnapshot {
   createdAt DateTime @default(now())
   @@index([propertyId, createdAt])
 }
+
+
+// Account-scoped, normalized delivery evidence; capture does not enable replay.
+model MessageDeliveryReceipt {
+  id                String   @id
+  provider          String
+  accountKey        String
+  eventKey          String
+  fingerprint       String
+  providerMessageId String
+  deliveryStatus    String
+  eventAt           DateTime
+  deliveredAt       DateTime?
+  providerErrorCode String?
+  receivedAt        DateTime @default(now())
+
+  @@unique([provider, accountKey, eventKey])
+  @@index([provider, accountKey, providerMessageId])
+  @@index([receivedAt])
+}

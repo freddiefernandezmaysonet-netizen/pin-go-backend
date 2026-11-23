@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "prisma/schema.prisma"
+      - "prisma/migrations/20261123013000_message_delivery_receipt_capture/**"
+      - "src/services/message-delivery-receipt-capture*"
+      - "src/routes/message-delivery.webhooks.capture.test.ts"
       - "prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/**"
       - "src/services/guest-journey-communications-delivery-outcome.*"
       - "src/workers/message-retry-provider-delivery.db.test.ts"
@@ -57,11 +60,13 @@ jobs:
           src/services/guest-journey-communications-delivery-outcome.service.test.ts
           src/services/guest-journey-communications-delivery-outcome.contract.test.ts
           src/routes/dashboard.messages.delivery-outcome.contract.test.ts
+          src/routes/message-delivery.webhooks.capture.test.ts
 
       - name: PostgreSQL delivery outcome persistence
         run: >-
           node --import tsx --test
           src/services/guest-journey-communications-delivery-outcome.db.test.ts
+          src/services/message-delivery-receipt-capture.db.test.ts
 
       - name: PostgreSQL provider retry eligibility
         run: >-
@@ -85,3 +90,4 @@ jobs:
           grep -q '"providerDeliveryStatus"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
           grep -q '"providerMessageId"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
           ! grep -Eq 'DROP COLUMN "status"|ALTER COLUMN "status"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
+
