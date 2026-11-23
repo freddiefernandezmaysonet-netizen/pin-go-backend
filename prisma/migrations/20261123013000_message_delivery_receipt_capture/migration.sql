@@ -15,6 +15,6 @@ CREATE TABLE "MessageDeliveryReceipt" (
 );
 CREATE UNIQUE INDEX "MessageDeliveryReceipt_provider_accountKey_eventKey_key"
   ON "MessageDeliveryReceipt"("provider", "accountKey", "eventKey");
-CREATE INDEX "MessageDeliveryReceipt_provider_accountKey_providerMessageId_idx"
+CREATE INDEX "MessageDeliveryReceipt_provider_account_message_idx"
   ON "MessageDeliveryReceipt"("provider", "accountKey", "providerMessageId");
 CREATE INDEX "MessageDeliveryReceipt_receivedAt_idx" ON "MessageDeliveryReceipt"("receivedAt");

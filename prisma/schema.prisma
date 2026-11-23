@@ -3862,6 +3862,6 @@ model MessageDeliveryReceipt {
   receivedAt        DateTime @default(now())
 
   @@unique([provider, accountKey, eventKey])
-  @@index([provider, accountKey, providerMessageId])
+  @@index([provider, accountKey, providerMessageId], map: "MessageDeliveryReceipt_provider_account_message_idx")
   @@index([receivedAt])
 }

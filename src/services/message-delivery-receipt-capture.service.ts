@@ -47,13 +47,13 @@ export async function captureVerifiedDeliveryReceipt(
   let stored: { id: string; fingerprint: string } | null;
   try {
     stored = await db.messageDeliveryReceipt.upsert({
-    where: { id }, update: {}, create: {
-      id, provider: outcome.provider, accountKey, eventKey, fingerprint,
-      providerMessageId: outcome.providerMessageId, deliveryStatus: outcome.status,
-      eventAt: outcome.eventAt, deliveredAt: outcome.deliveredAt ?? null,
-      providerErrorCode: outcome.errorCode ?? null,
-    }, select: { id: true, fingerprint: true },
-  });
+      where: { id }, update: {}, create: {
+        id, provider: outcome.provider, accountKey, eventKey, fingerprint,
+        providerMessageId: outcome.providerMessageId, deliveryStatus: outcome.status,
+        eventAt: outcome.eventAt, deliveredAt: outcome.deliveredAt ?? null,
+        providerErrorCode: outcome.errorCode ?? null,
+      }, select: { id: true, fingerprint: true },
+    });
   } catch (error) {
     // Prisma may emulate an upsert with an empty update; a concurrent insert
     // can win between read and create. Only a verified unique collision retries.
