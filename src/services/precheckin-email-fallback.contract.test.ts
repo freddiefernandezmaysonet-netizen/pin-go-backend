@@ -42,11 +42,11 @@ test("legacy pre-checkin keeps email and SMS completion independent", async () =
 
   assert.match(
     worker,
-    /messageDispatchLogs:\s*\{\s*none:\s*\{\s*type:\s*"PRECHECKIN",\s*channel:\s*"email",\s*status:\s*"SENT"/
+    /messageDispatchLogs:\s*\{\s*none:\s*\{\s*type:\s*"PRECHECKIN",\s*channel:\s*"email",\s*status:\s*\{\s*in:\s*\["SENT",\s*"E7_OWNED"\]/
   );
   assert.match(
     worker,
-    /messageDispatchLogs:\s*\{\s*none:\s*\{\s*type:\s*"PRECHECKIN",\s*channel:\s*"sms",\s*status:\s*"SENT"/
+    /messageDispatchLogs:\s*\{\s*none:\s*\{\s*type:\s*"PRECHECKIN",\s*channel:\s*"sms",\s*status:\s*\{\s*in:\s*\["SENT",\s*"E7_OWNED"\]/
   );
   assert.doesNotMatch(worker, /Pre-checkin obligation fulfilled/);
 });
