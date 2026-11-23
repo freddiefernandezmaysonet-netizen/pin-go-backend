@@ -1,3 +1,4 @@
+import { captureVerifiedDeliveryReceipt } from "../services/message-delivery-receipt-capture.service";
 import { retainLabReceipt, replayLabReceipts, readLabReceiptInbox } from "./receipt-inbox";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { assertLabEnvironment } from "./isolation";
@@ -59,7 +60,7 @@ export async function materializeFirstSendFixtures(db: PrismaClient, revision: s
   return results;
 }
 
-export async function dispatchFirstSend(db: PrismaClient, revision: string) {
+export async function dispatchFirstSend(db: PrismaClient, revision: string, capturedReceipts = false) {
   assertLabEnvironment(process.env);
   const scope = firstSendScope(revision);
   const property = await db.property.findUniqueOrThrow({ where: { id: scope.propertyId } });
@@ -80,10 +81,19 @@ export async function dispatchFirstSend(db: PrismaClient, revision: string) {
       if (scenario === "before_arrival") {
         // Simulate delivery before the adapter can persist the provider ID.
         const eventAt = new Date();
-        await retainLabReceipt(db, scope, { provider: String(claim.payload.channel).toLowerCase() === "email" ? "resend" : "twilio",
-          providerMessageId: providerId, status: "DELIVERED", eventAt, deliveredAt: eventAt });
+        const outcome = { provider: String(claim.payload.channel).toLowerCase() === "email" ? "resend" as const : "twilio" as const,
+          providerMessageId: providerId, status: "DELIVERED" as const, eventAt, deliveredAt: eventAt };
+        if (capturedReceipts) {
+          // Trusted synthetic callback, under the lab network fence; no real secret.
+          await captureVerifiedDeliveryReceipt(db, outcome,
+            {eventId: providerId, accountSid: "AC" + "0".repeat(32)},
+            {MESSAGE_DELIVERY_RECEIPT_INBOX_MODE: "CAPTURE",
+              TWILIO_ACCOUNT_SID: "AC" + "0".repeat(32), MESSAGE_DELIVERY_RESEND_ACCOUNT_KEY: "lab_resend"});
+        } else await retainLabReceipt(db, scope, outcome);
       }
-      return { id: providerId, sid: providerId, status: "queued" as const };
+      return { id: providerId, sid: providerId, status: "queued" as const,
+        ...(capturedReceipts ? {deliveryAccountKey: String(claim.payload.channel).toLowerCase() === "email"
+          ? "lab_resend" : "AC" + "0".repeat(32)} : {}) };
     };
     return executeGuestJourneyCommunicationDeliveryAdapter(client, claim,
       { ...options, now: property.createdAt, firstSendContract: "PRECHECKIN_DELIVERY_V1" }, { sendSms: send, sendEmail: send });
@@ -147,4 +157,5 @@ export async function readFirstSendEvidence(db: PrismaClient, revision: string) 
     legacyCoexistenceCertified: false, receiptInbox: await readLabReceiptInbox(db, scope),
     messages, intents, attempts, audit, calls, issues };
 }
+
 
