@@ -86,6 +86,15 @@ jobs:
           if ! git cat-file -e "$BASE_SHA:$push_migration" 2>/dev/null; then
             npx prisma db execute --file "$push_migration" --schema prisma/schema.prisma
           fi
+          # Keep the candidate Prisma client aligned with additive delivery tables.
+          for migration in \
+            prisma/migrations/20261123013000_message_delivery_receipt_capture/migration.sql \
+            prisma/migrations/20261123014500_message_delivery_account_binding/migration.sql \
+            prisma/migrations/20261123130000_message_delivery_receipt_processing/migration.sql; do
+            if ! git cat-file -e "$BASE_SHA:$migration" 2>/dev/null; then
+              npx prisma db execute --file "$migration" --schema prisma/schema.prisma
+            fi
+          done
           npx prisma generate
           inbox_migration=prisma/migrations/20261018163000_host_notification_inbox/migration.sql
           if ! git cat-file -e "$BASE_SHA:$inbox_migration" 2>/dev/null; then
