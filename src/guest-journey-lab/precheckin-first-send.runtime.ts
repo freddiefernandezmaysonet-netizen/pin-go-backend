@@ -1,3 +1,4 @@
+import { retainLabReceipt, replayLabReceipts, readLabReceiptInbox } from "./receipt-inbox";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { assertLabEnvironment } from "./isolation";
 import { firstSendScope, firstSendReservationId, materializeFirstPrecheckin } from "./precheckin-first-send";
@@ -76,6 +77,12 @@ export async function dispatchFirstSend(db: PrismaClient, revision: string) {
       const providerId = `LAB_FIRST_${messageId}`;
       await db.$executeRaw`INSERT INTO guest_journey_lab.provider_call(message_id, scenario, provider_id)
         VALUES (${messageId}, ${`first_${scenario}`}, ${providerId})`;
+      if (scenario === "before_arrival") {
+        // Simulate delivery before the adapter can persist the provider ID.
+        const eventAt = new Date();
+        await retainLabReceipt(db, scope, { provider: String(claim.payload.channel).toLowerCase() === "email" ? "resend" : "twilio",
+          providerMessageId: providerId, status: "DELIVERED", eventAt, deliveredAt: eventAt });
+      }
       return { id: providerId, sid: providerId, status: "queued" as const };
     };
     return executeGuestJourneyCommunicationDeliveryAdapter(client, claim,
@@ -94,9 +101,12 @@ export async function advanceFirstSendConsent(db: PrismaClient, revision: string
 export async function receiveFirstSendReceipts(db: PrismaClient, revision: string) {
   assertLabEnvironment(process.env);
   const scope = firstSendScope(revision);
+  await replayLabReceipts(db, scope);
   const messages = await db.messageLog.findMany({ where: { ...scope, id: { startsWith: "gjfirst_" }, providerMessageId: { not: null } } });
   for (const message of messages) {
     if (message.providerDeliveryStatus === "DELIVERED") continue;
+    // No fallback receipt may conceal a failed early-receipt replay.
+    if (message.reservationId === firstSendReservationId(revision, "before_arrival")) continue;
     if (message.provider !== "twilio" && message.provider !== "resend") throw Error("FIRST_SEND_PROVIDER_INVALID");
     const eventAt = new Date();
     await recordMessageDeliveryOutcome(db, { provider: message.provider, providerMessageId: message.providerMessageId!,
@@ -134,5 +144,7 @@ export async function readFirstSendEvidence(db: PrismaClient, revision: string) 
     db.operationalIssue.findMany({ where: scope, orderBy: { id: "asc" }, select: { id: true, workflowState: true, visibility: true, issueCode: true } }),
   ]);
   return { mode: "SIMULATED_FIRST_SEND", clockMode: "FIXED_AT_FIXTURE_CREATION", realDeliveryCertified: false,
-    legacyCoexistenceCertified: false, messages, intents, attempts, audit, calls, issues };
+    legacyCoexistenceCertified: false, receiptInbox: await readLabReceiptInbox(db, scope),
+    messages, intents, attempts, audit, calls, issues };
 }
+
