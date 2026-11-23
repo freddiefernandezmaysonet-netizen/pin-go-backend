@@ -308,3 +308,61 @@ test("PostgreSQL receipts survive a new process, deduplicate and reconcile witho
     await lab.prisma.property.delete({ where: { id: scope.propertyId } });
   }
 });
+
+
+test("captured early receipts recover through E7 to final delivery without repeating sends", async t => {
+  const producer = await import("./precheckin-first-send");
+  const probe = await import("./precheckin-first-send.runtime");
+  const { recoverDeliveryReceipts } = await import("../services/message-delivery-receipt-recovery.service");
+  const previous = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (previous === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = previous;
+  });
+  process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  const revision = lab.fixtureRevision + "_captured";
+  await lab.prepareLabTables();
+  await probe.seedFirstSend(lab.prisma, revision);
+  await probe.materializeFirstSendFixtures(lab.prisma, revision);
+  const scope = producer.firstSendScope(revision);
+  const reservationId = producer.firstSendReservationId(revision, "before_arrival");
+  assert.equal((await probe.dispatchFirstSend(lab.prisma, revision, true)).errors, 0);
+  const messages = await lab.prisma.messageLog.findMany({where: {...scope, reservationId}});
+  assert.equal(messages.length, 2);
+  const intents = await lab.prisma.guestJourneyCoordinationIntent.findMany({where: {reservationId}});
+  assert.equal(intents.length, 2);
+  for (const message of messages) {
+    assert.ok(message.providerAccountKey);
+    assert.ok(message.providerMessageId);
+    assert.equal(message.deliveredAt, null);
+    assert.equal(message.status, "E7_SENDING");
+  }
+  for (const intent of intents) {
+    assert.equal(intent.status, "WAITING_FOR_EVIDENCE");
+    assert.equal((await reconcile(lab.prisma, {...scope, intentId: intent.id})).action, "WAITING");
+  }
+  const before = await probe.readFirstSendEvidence(lab.prisma, revision);
+  await lab.prisma.$disconnect(); await lab.prisma.$connect();
+  const result = await recoverDeliveryReceipts(lab.prisma, {MESSAGE_DELIVERY_RECEIPT_RECOVERY_MODE: "APPLY"});
+  assert.equal(result.providerCalls, 0);
+  for (const message of messages) {
+    const receipt = await lab.prisma.messageDeliveryReceipt.findFirstOrThrow({where: {providerMessageId: message.providerMessageId!}});
+    assert.ok(receipt.processedAt);
+    assert.equal(receipt.processedMessageLogId, message.id);
+  }
+  for (const intent of intents) {
+    assert.equal((await reconcile(lab.prisma, {...scope, intentId: intent.id})).action, "RECOVERED");
+    assert.equal((await reconcile(lab.prisma, {...scope, intentId: intent.id})).action, "NOT_REQUIRED");
+    assert.equal((await lab.prisma.guestJourneyCoordinationIntent.findUniqueOrThrow({where: {id: intent.id}})).status, "SUCCEEDED");
+  }
+  await recoverDeliveryReceipts(lab.prisma, {MESSAGE_DELIVERY_RECEIPT_RECOVERY_MODE: "APPLY"});
+  await probe.dispatchFirstSend(lab.prisma, revision, true);
+  const after = await probe.readFirstSendEvidence(lab.prisma, revision);
+  assert.deepEqual(after.calls, before.calls);
+  for (const message of messages) {
+    const final = await lab.prisma.messageLog.findUniqueOrThrow({where: {id: message.id}});
+    assert.equal(final.providerDeliveryStatus, "DELIVERED");
+    assert.ok(final.deliveredAt);
+  }
+  assert.equal(after.realDeliveryCertified, false);
+});
