@@ -282,18 +282,28 @@ export function normalizeTwilioDeliveryCallback(
 
 export async function recordMessageDeliveryOutcome(
   prisma: PrismaClient,
-  outcome: ProviderDeliveryOutcome
+  outcome: ProviderDeliveryOutcome,
+  scope?: { messageLogId: string; accountKey: string; organizationId: string; propertyId: string }
 ) {
   if (!Number.isFinite(outcome.eventAt.getTime()) ||
       (outcome.deliveredAt && !Number.isFinite(outcome.deliveredAt.getTime()))) {
     throw new Error("COMMUNICATION_DELIVERY_EVENT_TIME_INVALID");
   }
 
+  if (scope && [scope.messageLogId, scope.accountKey, scope.organizationId, scope.propertyId].some(value => typeof value !== "string" || !value.trim())) {
+    throw new Error("COMMUNICATION_DELIVERY_SCOPE_INVALID");
+  }
+  const scopeWhere = scope ? {
+    id: scope.messageLogId, providerAccountKey: scope.accountKey,
+    organizationId: scope.organizationId, propertyId: scope.propertyId,
+  } : {};
+
   // Re-read after a competing callback wins. Never overwrite evidence using
   // a stale snapshot, and never acknowledge an exhausted conflict as applied.
   for (let attempt = 0; attempt < 3; attempt++) {
     const existing = await prisma.messageLog.findFirst({
       where: {
+        ...scopeWhere,
         provider: outcome.provider,
         providerMessageId: outcome.providerMessageId,
       },
@@ -330,6 +340,7 @@ export async function recordMessageDeliveryOutcome(
 
     const updated = await prisma.messageLog.updateMany({
       where: {
+        ...scopeWhere,
         id: existing.id,
         provider: outcome.provider,
         providerMessageId: outcome.providerMessageId,
@@ -353,3 +364,4 @@ export async function recordMessageDeliveryOutcome(
   }
   throw new Error("COMMUNICATION_DELIVERY_RECEIPT_CONFLICT");
 }
+
