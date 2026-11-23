@@ -346,3 +346,43 @@ test("an uncorrelated receipt still reports unmatched, not successful delivery",
   });
   assert.equal(f.writes.length, 0);
 });
+
+
+test("scoped recovery fences both lookup and write against account or tenant changes", async () => {
+  const scope = {messageLogId: "target", accountKey: "account-a", organizationId: "org-a", propertyId: "property-a"};
+  const outcome = {provider: "resend" as const, providerMessageId: "shared-id", status: "DELIVERED" as const,
+    eventAt: new Date("2026-11-22T12:00:00Z")};
+  let writes = 0;
+  const db = {messageLog: {
+    findFirst: async (args: any) => {
+      assert.equal(args.where.id, scope.messageLogId);
+      assert.equal(args.where.providerAccountKey, scope.accountKey);
+      assert.equal(args.where.organizationId, scope.organizationId);
+      assert.equal(args.where.propertyId, scope.propertyId);
+      return {id: scope.messageLogId, providerDeliveryStatus: null, providerStatusUpdatedAt: null, deliveredAt: null};
+    },
+    updateMany: async (args: any) => {
+      assert.equal(args.where.id, scope.messageLogId);
+      assert.equal(args.where.providerAccountKey, scope.accountKey);
+      assert.equal(args.where.organizationId, scope.organizationId);
+      assert.equal(args.where.propertyId, scope.propertyId);
+      writes++;
+      return {count: 0}; // Account/tenant changed after lookup: never acknowledge application.
+    },
+  }};
+  await assert.rejects(recordMessageDeliveryOutcome(db as any, outcome, scope), /RECEIPT_CONFLICT/);
+  assert.equal(writes, 3);
+  await assert.rejects(recordMessageDeliveryOutcome(db as any, outcome, {} as any), /SCOPE_INVALID/);
+  assert.equal(writes, 3);
+});
+
+test("scoped receipt cannot fall back to another account with the same provider identifier", async () => {
+  const db = {messageLog: {
+    findFirst: async () => null,
+    updateMany: async () => {throw Error("must not write");},
+  }};
+  const result = await recordMessageDeliveryOutcome(db as any, {
+    provider: "resend", providerMessageId: "shared-id", status: "DELIVERED", eventAt: new Date(),
+  }, {messageLogId: "missing", accountKey: "account-a", organizationId: "org-a", propertyId: "property-a"});
+  assert.deepEqual(result, {matched: false, applied: false, messageLogId: null});
+});
