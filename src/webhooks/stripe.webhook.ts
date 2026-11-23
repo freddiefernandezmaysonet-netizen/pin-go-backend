@@ -45,6 +45,22 @@ async function handleModificationPaymentEvent(event: Stripe.Event, session: Stri
   return handleGuestReservationModificationCheckoutPaid(session);
 }
 
+async function fulfillDirectBooking(session: Stripe.Checkout.Session) {
+  if (session.payment_status !== "paid") {
+    console.log("[DIRECT_BOOKING_PAYMENT_NOT_PAID]", {
+      sessionId: session.id,
+      paymentStatus: session.payment_status,
+    });
+    return;
+  }
+
+  const reservation = await handleDirectBookingCheckoutCompleted(session);
+  console.log("✅ direct booking reservation completed", {
+    sessionId: session.id,
+    reservationId: reservation?.id ?? null,
+  });
+}
+
 export function registerStripeWebhook(app: Express) {
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
 
@@ -132,12 +148,7 @@ export function registerStripeWebhook(app: Express) {
            const flow = String(session.metadata?.flow ?? "").trim();
 
            if (flow === "direct_booking") {
-             const reservation = await handleDirectBookingCheckoutCompleted(session);
-
-             console.log("✅ direct booking reservation completed", {
-               sessionId: session.id,
-               reservationId: reservation?.id ?? null,
-             });
+             await fulfillDirectBooking(session);
 
              break;
            }
@@ -185,6 +196,11 @@ export function registerStripeWebhook(app: Express) {
           case "checkout.session.async_payment_succeeded": {
             const session = event.data.object as Stripe.Checkout.Session;
             const flow = String(session.metadata?.flow ?? "").trim();
+
+            if (flow === "direct_booking") {
+              await fulfillDirectBooking(session);
+              break;
+            }
 
             if (session.metadata?.pendingSignupId && session.metadata.haasPlan === "haas" && session.payment_status === "paid") {
               await maybeCompleteSignupOnboarding(session);
