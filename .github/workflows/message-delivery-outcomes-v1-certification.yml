@@ -98,4 +98,3 @@ jobs:
           grep -q '"providerDeliveryStatus"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
           grep -q '"providerMessageId"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
           ! grep -Eq 'DROP COLUMN "status"|ALTER COLUMN "status"' prisma/migrations/20260926174500_add_message_delivery_outcomes_v1/migration.sql
-

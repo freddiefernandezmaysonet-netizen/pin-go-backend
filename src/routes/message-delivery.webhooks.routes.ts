@@ -262,4 +262,3 @@ export const __messageDeliveryWebhookInternals = {
   publicApiBaseUrl,
   twilioCallbackUrl,
 };
-

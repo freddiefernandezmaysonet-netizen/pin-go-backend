@@ -157,5 +157,3 @@ export async function readFirstSendEvidence(db: PrismaClient, revision: string) 
     legacyCoexistenceCertified: false, receiptInbox: await readLabReceiptInbox(db, scope),
     messages, intents, attempts, audit, calls, issues };
 }
-
-

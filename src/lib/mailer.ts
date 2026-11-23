@@ -3037,4 +3037,3 @@ export async function sendManualReservationGuestCancellationEmail(
     providerMessageId: data?.id ?? null,
   };
 }
-

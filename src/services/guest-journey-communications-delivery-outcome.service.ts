@@ -364,4 +364,3 @@ export async function recordMessageDeliveryOutcome(
   }
   throw new Error("COMMUNICATION_DELIVERY_RECEIPT_CONFLICT");
 }
-
