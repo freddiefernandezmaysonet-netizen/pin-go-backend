@@ -366,3 +366,22 @@ test("captured early receipts recover through E7 to final delivery without repea
   }
   assert.equal(after.realDeliveryCertified, false);
 });
+
+test("canary materialization assigns only an approved channel and preserves ownership on repeat", async () => {
+  const {materializeScopedPrecheckin} = await import("../services/guest-journey-precheckin-materialization.service");
+  const {firstSendScope, firstSendReservationId} = await import("./precheckin-first-send");
+  const {seedFirstSend} = await import("./precheckin-first-send.runtime");
+  const revision = lab.fixtureRevision + "_owner";
+  await seedFirstSend(lab.prisma, revision);
+  const scope = firstSendScope(revision);
+  const reservationId = firstSendReservationId(revision, "before_arrival");
+  const property = await lab.prisma.property.findUniqueOrThrow({where: {id: scope.propertyId}});
+  const allow = {email: "before_arrival@example.invalid", sms: "+15005550099"};
+  const run = () => materializeScopedPrecheckin(lab.prisma, scope, reservationId, property.createdAt, undefined, allow);
+  await run(); await run();
+  const owned = await lab.prisma.messageDispatchLog.findMany({where: {reservationId, type: "PRECHECKIN"}});
+  assert.deepEqual(owned.map(row => [row.channel, row.status]), [["email", "E7_OWNED"]]);
+  assert.equal(await lab.prisma.guestJourneyCoordinationIntent.count({where: {reservationId,
+    reasonCode: "PRECHECKIN_CANARY_FIRST_SEND"}}), 1);
+  assert.equal(await lab.prisma.messageLog.count({where: {...scope, reservationId, channel: "sms"}}), 0);
+});

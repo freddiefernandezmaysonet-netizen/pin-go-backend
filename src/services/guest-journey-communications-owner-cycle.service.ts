@@ -68,11 +68,15 @@ function validateConfig(config: GuestJourneyCommunicationsOwnerConfig): void {
 async function selectCandidates(
   prisma: PrismaClient,
   config: GuestJourneyCommunicationsOwnerConfig,
-  now: Date
+  now: Date,
+  canaryReservationId?: string
 ): Promise<Array<{ id: string; reservation: { propertyId: string; property: { organizationId: string } } }>> {
 
   return prisma.guestJourneyCoordinationIntent.findMany({
     where: {
+      ...(canaryReservationId
+        ? { reservationId: canaryReservationId, reasonCode: "PRECHECKIN_CANARY_FIRST_SEND" }
+        : { NOT: { reasonCode: "PRECHECKIN_CANARY_FIRST_SEND" } }),
       targetEngine: "COMMUNICATIONS",
       intentType: { in: ["REQUEST_COMMUNICATION", "REQUEST_COMMUNICATION_RETRY"] },
       AND: [
@@ -113,6 +117,7 @@ export async function runGuestJourneyCommunicationsOwnerCycle(
   config: GuestJourneyCommunicationsOwnerConfig,
   options: {
     now?: Date;
+    canaryReservationId?: string;
     logger?: (entry: { event: "GUEST_JOURNEY_COMMUNICATIONS_OWNER_CYCLE"; metrics: CommunicationsOwnerCycleMetrics }) => void;
     dependencies?: Partial<CycleDependencies>;
   } = {}
@@ -146,7 +151,7 @@ export async function runGuestJourneyCommunicationsOwnerCycle(
 
   const dependencies = { ...DEFAULT_DEPENDENCIES, ...options.dependencies };
   const now = options.now ?? dependencies.clock();
-  const candidates = await selectCandidates(prisma, config, now);
+  const candidates = await selectCandidates(prisma, config, now, options.canaryReservationId);
   metrics.selected = candidates.length;
 
   for (const candidate of candidates) {
@@ -192,6 +197,7 @@ export async function runGuestJourneyCommunicationsOwnerCycle(
           {
             now: dependencies.clock(),
             providerTimeoutMs: config.providerTimeoutMs,
+            ...(options.canaryReservationId ? {firstSendContract: "PRECHECKIN_DELIVERY_V1" as const} : {}),
           }
         );
         metrics.executed += 1;
