@@ -22,6 +22,9 @@
     "src/routes/message-delivery.webhooks.capture.test.ts",
     "src/services/message-delivery-account-binding.service.ts",
     "src/services/message-delivery-account-binding.service.test.ts",
-    "src/services/message-delivery-account-binding.db.test.ts"
+    "src/services/message-delivery-account-binding.db.test.ts",
+    "src/services/message-delivery-receipt-recovery.service.ts",
+    "src/services/message-delivery-receipt-recovery.db.test.ts",
+    "src/workers/message-delivery-receipt-recovery.worker.ts"
   ]
 }

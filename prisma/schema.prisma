@@ -3851,6 +3851,13 @@ model DirectBookingPricingSnapshot {
 
 // Account-scoped, normalized delivery evidence; capture does not enable replay.
 model MessageDeliveryReceipt {
+  processedAt DateTime?
+  processedMessageLogId String?
+  lastAttemptAt DateTime?
+  lastOutcome String?
+  attempts Int @default(0)
+
+  @@index([processedAt, lastAttemptAt, receivedAt], map: "MessageDeliveryReceipt_pending_idx")
   id                String   @id
   provider          String
   accountKey        String
