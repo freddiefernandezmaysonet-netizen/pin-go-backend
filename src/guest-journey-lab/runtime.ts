@@ -1,3 +1,4 @@
+import { prepareReceiptInbox } from "./receipt-inbox";
 import { PrismaClient, Prisma } from "@prisma/client";
 import { materializeGuestJourneyCoordinationIntents } from "../services/guest-journey-coordination-intent.service";
 import { runGuestJourneyCommunicationsOwnerCycle } from "../services/guest-journey-communications-owner-cycle.service";
@@ -27,6 +28,7 @@ export async function prepareLabTables(): Promise<void> {
     details JSONB NOT NULL
   )`);
   await preparePrecheckinShadow(prisma);
+  await prepareReceiptInbox(prisma);
 }
 
 /** Seed once. Restarting must preserve claims, receipts and call counts. */
@@ -186,3 +188,4 @@ export async function readLabEvidence() {
     precheckinFirstSend,
   };
 }
+

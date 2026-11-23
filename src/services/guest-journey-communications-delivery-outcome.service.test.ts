@@ -98,6 +98,7 @@ test("delivery transitions do not downgrade terminal evidence", () => {
 function fakePrisma(input: {
   providerDeliveryStatus?: string | null;
   deliveredAt?: Date | null;
+  providerStatusUpdatedAt?: Date | null;
 }) {
   const updates: any[] = [];
 
@@ -110,10 +111,15 @@ function fakePrisma(input: {
           providerDeliveryStatus:
             input.providerDeliveryStatus ?? null,
           deliveredAt: input.deliveredAt ?? null,
+          providerStatusUpdatedAt: input.providerStatusUpdatedAt ?? null,
         }),
         update: async (args: any) => {
           updates.push(args);
           return { id: "message-1" };
+        },
+        updateMany: async (args: any) => {
+          updates.push(args);
+          return { count: 1 };
         },
       },
     } as any,
@@ -240,4 +246,103 @@ test("Resend Svix signature verifier accepts valid payload and rejects tampering
     false,
     "stale signatures must be rejected"
   );
+});
+
+
+const receiptTime = new Date("2026-11-22T16:00:02Z");
+const oldReceiptTime = new Date("2026-11-22T16:00:01Z");
+const deliveredReceipt = {
+  provider: "twilio" as const, providerMessageId: "SM_test",
+  status: "DELIVERED" as const, eventAt: receiptTime, deliveredAt: receiptTime,
+};
+
+function concurrentReceiptFixture() {
+  let row: any = { id: "message-1", provider: "twilio", providerMessageId: "SM_test",
+    providerDeliveryStatus: "SENT", providerStatusUpdatedAt: oldReceiptTime, deliveredAt: null };
+  const writes: any[] = [];
+  const same = (a: any, b: any) => a instanceof Date && b instanceof Date ? +a === +b : a === b;
+  const prisma = { messageLog: {
+    findFirst: async () => ({ ...row }),
+    update: async ({data}: any) => { row = { ...row, ...data }; writes.push(data); return row; },
+    updateMany: async ({ where, data }: any) => {
+      if (!Object.entries(where).every(([key, value]) => same(row[key], value))) return { count: 0 };
+      row = { ...row, ...data }; writes.push(data); return { count: 1 };
+    },
+  } } as any;
+  return { prisma, writes, read: () => ({ ...row }) };
+}
+
+test("older duplicate delivery preserves the recovery timestamp invariant", async () => {
+  const f = concurrentReceiptFixture();
+  await recordMessageDeliveryOutcome(f.prisma, deliveredReceipt);
+  const confirmed = f.read();
+  const result = await recordMessageDeliveryOutcome(f.prisma, {
+    ...deliveredReceipt, eventAt: oldReceiptTime, deliveredAt: oldReceiptTime,
+  });
+  assert.equal(result.applied, false);
+  assert.deepEqual(f.read(), confirmed);
+  assert.ok(f.read().providerStatusUpdatedAt >= f.read().deliveredAt);
+  assert.equal(f.writes.length, 1);
+});
+
+test("identical callbacks are idempotent and later callbacks retain original delivery time", async () => {
+  const f = concurrentReceiptFixture();
+  await recordMessageDeliveryOutcome(f.prisma, deliveredReceipt);
+  assert.equal((await recordMessageDeliveryOutcome(f.prisma, deliveredReceipt)).applied, false);
+  const later = new Date(+receiptTime + 1000);
+  assert.equal((await recordMessageDeliveryOutcome(f.prisma, {
+    ...deliveredReceipt, eventAt: later, deliveredAt: later,
+  })).applied, true);
+  assert.deepEqual(f.read().deliveredAt, receiptTime);
+  assert.deepEqual(f.read().providerStatusUpdatedAt, later);
+});
+
+test("stronger late terminal evidence is retained without moving timestamps backwards", async () => {
+  const f = concurrentReceiptFixture();
+  await recordMessageDeliveryOutcome(f.prisma, deliveredReceipt);
+  await recordMessageDeliveryOutcome(f.prisma, {
+    ...deliveredReceipt, status: "COMPLAINED", eventAt: oldReceiptTime,
+    deliveredAt: null, errorMessage: "Synthetic complaint",
+  });
+  assert.equal(f.read().providerDeliveryStatus, "COMPLAINED");
+  assert.deepEqual(f.read().providerStatusUpdatedAt, receiptTime);
+  assert.deepEqual(f.read().deliveredAt, receiptTime);
+});
+
+test("concurrent callbacks cannot overwrite a terminal result from a stale snapshot", async () => {
+  for (const reverse of [false, true]) {
+    const f = concurrentReceiptFixture();
+    const delayed = { ...deliveredReceipt, status: "DELIVERY_DELAYED" as const,
+      eventAt: new Date(+receiptTime + 1000), deliveredAt: null };
+    const outcomes = reverse ? [delayed, deliveredReceipt] : [deliveredReceipt, delayed];
+    await Promise.all(outcomes.map(outcome => recordMessageDeliveryOutcome(f.prisma, outcome)));
+    assert.equal(f.read().providerDeliveryStatus, "DELIVERED");
+    assert.ok(f.read().providerStatusUpdatedAt >= f.read().deliveredAt);
+  }
+});
+
+test("repeated conflicts throw instead of reporting an unapplied receipt as successful", async () => {
+  const f = concurrentReceiptFixture();
+  let conflicts = 0;
+  f.prisma.messageLog.updateMany = async () => { conflicts++; return { count: 0 }; };
+  await assert.rejects(recordMessageDeliveryOutcome(f.prisma, deliveredReceipt), /RECEIPT_CONFLICT/);
+  assert.equal(conflicts, 3);
+  assert.equal(f.read().providerDeliveryStatus, "SENT");
+});
+
+test("invalid event dates fail before any persistence", async () => {
+  const f = concurrentReceiptFixture();
+  for (const invalid of [{ eventAt: new Date(NaN) }, { deliveredAt: new Date(NaN) }]) {
+    await assert.rejects(recordMessageDeliveryOutcome(f.prisma, { ...deliveredReceipt, ...invalid }), /EVENT_TIME_INVALID/);
+  }
+  assert.equal(f.writes.length, 0);
+});
+
+test("an uncorrelated receipt still reports unmatched, not successful delivery", async () => {
+  const f = concurrentReceiptFixture();
+  f.prisma.messageLog.findFirst = async () => null;
+  assert.deepEqual(await recordMessageDeliveryOutcome(f.prisma, deliveredReceipt), {
+    matched: false, applied: false, messageLogId: null,
+  });
+  assert.equal(f.writes.length, 0);
 });

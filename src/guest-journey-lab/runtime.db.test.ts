@@ -188,6 +188,9 @@ test("first-send commits outbox plus intent atomically and certifies simulated d
   }
   await probe.runFirstSendProbe(lab.prisma, revision);
   const complete = await probe.readFirstSendEvidence(lab.prisma, revision);
+  assert.equal(complete.receiptInbox.retained, 2);
+  assert.equal(complete.receiptInbox.processed, 2);
+  assert.equal(complete.receiptInbox.pending, 0);
   assert.equal(complete.messages.length, 12);
   assert.equal(complete.intents.length, 11);
   assert.equal(complete.attempts.length, 11);
@@ -209,4 +212,99 @@ test("first-send commits outbox plus intent atomically and certifies simulated d
   await probe.seedFirstSend(lab.prisma, revision);
   await probe.runFirstSendProbe(lab.prisma, revision);
   assert.deepEqual(await probe.readFirstSendEvidence(lab.prisma, revision), complete);
+});
+
+
+test("PostgreSQL receipts survive a new process, deduplicate and reconcile without another send", async () => {
+  const { randomUUID } = await import("node:crypto");
+  const { execFileSync } = await import("node:child_process");
+  const inbox = await import("./receipt-inbox");
+  const { recordMessageDeliveryOutcome: record } = await import("../services/guest-journey-communications-delivery-outcome.service");
+  await lab.prepareLabTables();
+  await lab.seedLabFixtures();
+  const suffix = randomUUID().replaceAll("-", "");
+  const scope = { organizationId: "gj_lab_organization", propertyId: `gj_lab_receipt_test_${suffix}` };
+  await lab.prisma.property.create({ data: { id: scope.propertyId, organizationId: scope.organizationId,
+    name: "Synthetic receipt persistence test", isTestProperty: true } });
+  const messageId = `receipt_test_${suffix}`;
+  const providerId = `LAB_RECEIPT_${suffix}`;
+  const eventAt = new Date();
+  const receipt = { provider: "twilio" as const, providerMessageId: providerId,
+    status: "DELIVERED" as const, eventAt, deliveredAt: eventAt };
+  try {
+    await lab.prisma.messageLog.create({ data: { id: messageId, ...scope,
+      channel: "sms", provider: "twilio", to: "+15005550006", body: "Synthetic receipt test",
+      status: "E7_SENDING", retryCount: 1, communicationType: "PRECHECKIN" } });
+    const retained = await Promise.all([inbox.retainLabReceipt(lab.prisma, scope, receipt),
+      inbox.retainLabReceipt(lab.prisma, scope, receipt)]);
+    assert.equal(retained[0], retained[1]);
+    assert.equal((await inbox.readLabReceiptInbox(lab.prisma, scope)).retained, 1);
+    assert.equal((await inbox.replayLabReceipts(lab.prisma, scope)).processed, 0);
+    assert.equal((await inbox.readLabReceiptInbox(lab.prisma, scope)).pending, 1);
+    await lab.prisma.messageLog.update({ where: { id: messageId }, data: { providerMessageId: providerId } });
+
+    // A failed processing acknowledgement must roll back the message update too.
+    const failing = { $transaction: (work: (tx: any) => Promise<unknown>) => lab.prisma.$transaction(tx => work(
+      new Proxy(tx, { get(target, key) {
+        if (key === "$executeRaw") return async (query: TemplateStringsArray, ...values: any[]) => {
+          if (query.join("").includes("SET processed_at")) throw Error("SYNTHETIC_INBOX_ACK_FAILURE");
+          return target.$executeRaw(query, ...values);
+        };
+        const value = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      } })
+    )) } as unknown as typeof lab.prisma;
+    await assert.rejects(inbox.replayLabReceipts(failing, scope), /SYNTHETIC_INBOX_ACK_FAILURE/);
+    assert.equal((await lab.prisma.messageLog.findUniqueOrThrow({ where: { id: messageId } })).deliveredAt, null);
+    assert.equal((await inbox.readLabReceiptInbox(lab.prisma, scope)).pending, 1);
+
+    await lab.prisma.$disconnect();
+    const script = `
+      const isolation = await import('./src/guest-journey-lab/isolation.ts');
+      isolation.assertLabEnvironment(process.env); isolation.installLabNetworkFence();
+      const { PrismaClient } = await import('@prisma/client');
+      const { replayLabReceipts } = await import('./src/guest-journey-lab/receipt-inbox.ts');
+      const db = new PrismaClient();
+      try { const result = await replayLabReceipts(db, ${JSON.stringify(scope)});
+        if (result.processed !== 1 || result.providerCalls !== 0) throw Error('REPLAY_NOT_CONFIRMED');
+      } finally { await db.$disconnect(); }
+    `;
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script],
+      { env: process.env, timeout: 30000, stdio: "pipe" });
+    await lab.prisma.$connect();
+    const delivered = await lab.prisma.messageLog.findUniqueOrThrow({ where: { id: messageId } });
+    assert.equal(delivered.providerDeliveryStatus, "DELIVERED");
+    assert.equal(delivered.status, "E7_SENDING", "receipt persistence does not own workflow completion");
+    assert.equal(delivered.retryCount, 1);
+    assert.equal(+delivered.deliveredAt!, +eventAt);
+    assert.equal((await inbox.readLabReceiptInbox(lab.prisma, scope)).processed, 1);
+    assert.equal((await inbox.replayLabReceipts(lab.prisma, scope)).processed, 0);
+
+    await record(lab.prisma, { ...receipt, eventAt: new Date(+eventAt - 1000), deliveredAt: new Date(+eventAt - 1000) });
+    const stale = await lab.prisma.messageLog.findUniqueOrThrow({ where: { id: messageId } });
+    assert.equal(+stale.providerStatusUpdatedAt!, +eventAt);
+    assert.equal(+stale.deliveredAt!, +eventAt);
+    const race = await Promise.allSettled([
+      record(lab.prisma, { ...receipt, status: "READ", eventAt: new Date(+eventAt + 1000) }),
+      record(lab.prisma, { ...receipt, status: "SENT", eventAt: new Date(+eventAt + 2000), deliveredAt: null }),
+    ]);
+    assert.ok(race.every(result => result.status === "fulfilled"));
+    assert.equal((await lab.prisma.messageLog.findUniqueOrThrow({ where: { id: messageId } })).providerDeliveryStatus, "READ");
+
+    // An ambiguous identifier is retained for investigation, never assigned arbitrarily.
+    await lab.prisma.messageLog.create({ data: { id: `${messageId}_duplicate`, ...scope,
+      channel: "sms", provider: "twilio", providerMessageId: providerId,
+      to: "+15005550006", body: "Synthetic ambiguous correlation", status: "E7_SENDING" } });
+    await inbox.retainLabReceipt(lab.prisma, scope, { ...receipt, status: "READ", eventAt: new Date(+eventAt + 3000) });
+    assert.equal((await inbox.replayLabReceipts(lab.prisma, scope)).processed, 0);
+    assert.equal((await inbox.readLabReceiptInbox(lab.prisma, scope)).pending, 1);
+    await assert.rejects(inbox.retainLabReceipt(lab.prisma, { ...scope, organizationId: "other" }, receipt), /SCOPE_REJECTED/);
+    await assert.rejects(inbox.retainLabReceipt(lab.prisma, scope, { ...receipt, eventAt: new Date(NaN) }), /RECEIPT_INVALID/);
+    assert.equal(await lab.prisma.$queryRaw<Array<{ count: number }>>`SELECT COUNT(*)::int AS count
+      FROM guest_journey_lab.provider_call WHERE message_id=${messageId}`.then(rows => rows[0].count), 0);
+  } finally {
+    await lab.prisma.$executeRaw`DELETE FROM guest_journey_lab.receipt_inbox WHERE property_id=${scope.propertyId}`;
+    await lab.prisma.messageLog.deleteMany({ where: { propertyId: scope.propertyId } });
+    await lab.prisma.property.delete({ where: { id: scope.propertyId } });
+  }
 });
