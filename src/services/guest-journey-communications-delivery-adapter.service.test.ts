@@ -47,6 +47,7 @@ function fakePrisma(input: {
     to: "+17875550101",
     body: "Existing canonical body",
     providerMessageId: null as string | null,
+    providerAccountKey: null as string | null,
     deliveredAt: null as Date | null,
     error: "provider failed",
     ...input.message,
@@ -87,6 +88,7 @@ function fakePrisma(input: {
         if (args.data.providerMessageId !== undefined) {
           message.providerMessageId = args.data.providerMessageId;
         }
+        if (args.data.providerAccountKey !== undefined) message.providerAccountKey = args.data.providerAccountKey;
         if (args.data.error !== undefined) message.error = args.data.error;
         if (args.data.retryCount?.increment) message.retryCount += args.data.retryCount.increment;
         return { count: 1 };
@@ -548,4 +550,83 @@ test("queued Channex identity reminder becomes obsolete without contacting a pro
     { now }, { sendSms: async () => { throw new Error("must not send"); }, sendEmail: noEmail });
   assert.equal(result.providerCalls, 0);
   assert.equal(message.status, "OBSOLETE");
+});
+
+
+
+test("account provenance follows the transport response, including late acknowledgements", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  const account = "AC" + "a".repeat(32);
+  for (const late of [false, true]) {
+    const f = fakePrisma({});
+    let resolve!: (result: any) => void;
+    let calls = 0;
+    const response = {sid: "SM-bound", status: "queued" as const, deliveryAccountKey: account};
+    const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"});
+    const deps = {sendSms: async () => {
+      calls++;
+      return late ? new Promise<any>(done => {resolve = done;}) : response;
+    }, sendEmail: noEmail};
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now, providerTimeoutMs: 5}, deps);
+    if (late) {
+      process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "0";
+      resolve(response);
+      await new Promise(done => setImmediate(done));
+    }
+    assert.equal(f.message.providerAccountKey, account);
+    assert.equal(f.message.providerMessageId, "SM-bound");
+    const ack = f.updates.find(update => update.data.providerMessageId === "SM-bound");
+    assert.equal(ack.data.providerAccountKey, account, "account and identifier are persisted atomically");
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(calls, 1);
+    process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  }
+});
+
+test("missing account evidence holds the send fence; disabled binding clears stale provenance", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  for (const enabled of ["1", "0"]) {
+    process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = enabled;
+    const f = fakePrisma({message: {providerAccountKey: "AC" + "b".repeat(32)}});
+    let calls = 0;
+    const deps = {sendSms: async () => {calls++; return {sid: "SM-new", status: "queued" as const};}, sendEmail: noEmail};
+    const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"});
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(f.message.providerAccountKey, null);
+    assert.equal(result.completion.kind, enabled === "1" ? "WAITING_FOR_EVIDENCE" : "SUCCEEDED");
+    assert.equal(f.message.status, enabled === "1" ? "E7_SENDING" : "SENT");
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(calls, 1);
+  }
+});
+
+test("first email stores its Resend account beside acceptance without declaring delivery", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  const f = fakePrisma({message: {status: "APMS_PENDING", channel: "email", to: "guest@example.com",
+    body: JSON.stringify({kind: "PIN_GO_EMAIL_DELIVERY", type: "PRECHECKIN", retryPayload: {}})},
+    reservation: firstSendReservation});
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+    claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "email"}, "REQUEST_COMMUNICATION"),
+    firstSendOptions, {
+      sendSms: async () => {throw Error("unexpected SMS");},
+      sendEmail: async () => ({data: {id: "EM-account"}, deliveryAccountKey: "resend_account_1"}),
+    });
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  assert.equal(f.message.providerAccountKey, "resend_account_1");
+  assert.equal(f.message.providerMessageId, "EM-account");
+  assert.equal(f.message.deliveredAt, null);
 });

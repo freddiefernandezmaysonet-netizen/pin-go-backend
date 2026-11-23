@@ -1,3 +1,4 @@
+import { deliveryAccountBindingEnabled, readDeliveryAccountKey } from "./message-delivery-account-binding.service";
 import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
@@ -11,6 +12,7 @@ import { PrismaClient, ReservationStatus } from "@prisma/client";
 
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
+  getResendDeliveryAccountKey,
   sendDirectBookingGuestCancellationEmail,
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostCancellationNotification,
@@ -97,7 +99,7 @@ function datesMatch(value: unknown, current: Date): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.getTime() === current.getTime();
 }
 
-async function defaultSendEmail(input: {
+async function sendEmailWithoutAccountEnvelope(input: {
   prisma: PrismaClient;
   type: string;
   to: string;
@@ -248,6 +250,13 @@ async function defaultSendEmail(input: {
   }
 }
 
+async function defaultSendEmail(input: Parameters<typeof sendEmailWithoutAccountEnvelope>[0]): Promise<unknown> {
+  const accountKey = deliveryAccountBindingEnabled() ? getResendDeliveryAccountKey() : null;
+  const result = await sendEmailWithoutAccountEnvelope(input);
+  return accountKey && result && typeof result === "object"
+    ? { ...result, deliveryAccountKey: accountKey } : result;
+}
+
 const DEFAULT_DEPENDENCIES: DeliveryDependencies = {
   sendSms,
   sendEmail: defaultSendEmail,
@@ -277,6 +286,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw new Error("GUEST_JOURNEY_COMMUNICATIONS_ADAPTER_CONTRACT_MISMATCH");
   }
 
+  const bindAccount = deliveryAccountBindingEnabled();
   const now = new Date(options.now ?? new Date());
   const firstSend = options.firstSendContract === "PRECHECKIN_DELIVERY_V1";
   if (Number.isNaN(now.getTime())) {
@@ -290,6 +300,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   const messageLogId = clean(claim.payload.messageLogId);
   const requestedType = clean(claim.payload.communicationType);
   const requestedChannel = clean(claim.payload.channel).toLowerCase();
+  const deliveryProvider = requestedChannel === "sms" ? "twilio" : "resend";
   if (!messageLogId || !requestedType || !["email", "sms"].includes(requestedChannel)) {
     return {
       providerCalls: 0,
@@ -690,7 +701,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
           reservationId: claim.reservationId, status: "E7_SENDING", providerMessageId: null,
           retryCount: { in: [dispatchRetryCount, dispatchRetryCount + 1] },
         },
-        data: { providerMessageId: id },
+        data: { providerMessageId: id, provider: deliveryProvider, providerAccountKey: bindAccount ? readDeliveryAccountKey(deliveryProvider, result) : null },
       });
       if (persisted.count !== 1) {
         console.warn("COMMUNICATION_LATE_ACK_FENCE_LOST", { messageLogId, intentId: claim.intentId });
@@ -764,8 +775,10 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   const persisted = await prisma.messageLog.updateMany({
     where: { id: message.id, status: "E7_SENDING" },
     data: {
-      status: firstSend ? "E7_SENDING" : "SENT",
+      status: firstSend || (bindAccount && !readDeliveryAccountKey(deliveryProvider, providerResult)) ? "E7_SENDING" : "SENT",
       providerMessageId,
+      provider: deliveryProvider,
+      providerAccountKey: bindAccount ? readDeliveryAccountKey(deliveryProvider, providerResult) : null,
       retryCount: { increment: 1 },
       error: null,
     },
@@ -774,6 +787,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw new Error("COMMUNICATION_DELIVERY_RESULT_PERSISTENCE_LOST");
   }
 
+  if (bindAccount && !readDeliveryAccountKey(deliveryProvider, providerResult)) {
+    return pendingReceipt(1, "COMMUNICATION_PROVIDER_ACCOUNT_UNCONFIRMED");
+  }
   if (firstSend) return pendingReceipt(1, "COMMUNICATION_DELIVERY_RECEIPT_REQUIRED");
 
   return {
@@ -792,3 +808,4 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
   };
 }
+
