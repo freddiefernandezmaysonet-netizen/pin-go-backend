@@ -39,6 +39,7 @@ function fixture(rows, options = {}) {
       if (key === "OR") return value.some(w => matches(row, w));
       if (key === "messageDispatchLogs") return !dispatch.some(log => log.reservationId === row.id && matches(log, value.none));
       if (value && typeof value === "object" && !(value instanceof Date)) return Object.entries(value).every(([op, expected]) => {
+        if (op === "in") return expected.includes(row[key]);
         if (op === "not") return row[key] !== expected;
         if (op === "gt") return row[key] > expected;
         if (op === "lte") return row[key] <= expected;
@@ -122,4 +123,15 @@ test("OTA routing and external delivery blocks prevent Twilio fallback", async (
     const f = fixture([reservation("r", { externalProvider: "CHANNEX", externalId: "synthetic-booking" })], options);
     await f.run(noon); assert.equal(f.sms.length, 0); assert.equal(f.emails.length, 0);
   }
+});
+
+test("legacy pre-checkin honors durable E7 ownership after canary shutdown", async () => {
+  const f = fixture([reservation()]);
+  f.dispatch.splice(0, f.dispatch.length, ...["email", "sms"].map(channel => ({
+    reservationId: "r", type: "PRECHECKIN", channel, status: "E7_OWNED",
+  })));
+  await f.run(noon);
+  await f.service.sendPreCheckinEmail(f.db, "r");
+  await f.service.sendPreCheckinSms(f.db, "r", noon);
+  assert.equal(f.emails.length + f.sms.length, 0);
 });

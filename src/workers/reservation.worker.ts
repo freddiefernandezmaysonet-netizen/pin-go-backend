@@ -423,13 +423,13 @@ async function processPreCheckinMessages(
                 guestEmail: {
                   not: null,
                 },
-                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "email", status: "SENT" } },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "email", status: { in: ["SENT", "E7_OWNED"] } } },
               },
               {
                 guestPhone: {
                   not: null,
                 },
-                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "sms", status: "SENT" } },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "sms", status: { in: ["SENT", "E7_OWNED"] } } },
               },
             ],
           },
