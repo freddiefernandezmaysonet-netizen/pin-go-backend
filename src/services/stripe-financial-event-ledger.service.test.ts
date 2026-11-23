@@ -300,11 +300,13 @@ test("legacy Direct Booking ledger completion does not touch reservation or Stri
   assert.equal(getRow()?.processedAt, processedAt);
 });
 
-test("Direct Charge ledger completion reconciles host financial evidence before marking processed", async () => {
+async function assertPaidDirectChargeEvidence(
+  eventType: "checkout.session.completed" | "checkout.session.async_payment_succeeded"
+) {
   const directEvent = {
     id: "evt_direct",
     object: "event",
-    type: "checkout.session.completed",
+    type: eventType,
     livemode: true,
     account: "acct_host",
     data: {
@@ -312,6 +314,7 @@ test("Direct Charge ledger completion reconciles host financial evidence before 
         id: "cs_direct",
         object: "checkout.session",
         payment_intent: "pi_direct",
+        payment_status: "paid",
         metadata: {
           flow: "direct_booking",
           stripeChargeMode: "DIRECT_CHARGE",
@@ -401,4 +404,10 @@ test("Direct Charge ledger completion reconciles host financial evidence before 
   );
   assert.equal(getRow()?.processedAt, processedAt);
   assert.equal(getRow()?.error, null);
-});
+}
+
+test("paid Direct Charge completion reconciles host financial evidence before marking processed", () =>
+  assertPaidDirectChargeEvidence("checkout.session.completed"));
+
+test("paid Direct Charge async settlement reconciles host financial evidence before marking processed", () =>
+  assertPaidDirectChargeEvidence("checkout.session.async_payment_succeeded"));

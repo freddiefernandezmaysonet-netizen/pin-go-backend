@@ -215,6 +215,7 @@ test("financial reconciliation stores actual Stripe fee and host net for Direct 
         object: {
           id: "cs_direct",
           payment_intent: "pi_direct",
+          payment_status: "paid",
           metadata: {
             flow: "direct_booking",
             stripeChargeMode: "DIRECT_CHARGE",
@@ -260,6 +261,24 @@ test("financial reconciliation stores actual Stripe fee and host net for Direct 
     hostNetAmountCents: 818,
     stripeBalanceTransactionId: "txn_direct",
   });
+});
+
+test("unpaid Direct Charge completion does not access reservations or Stripe", async () => {
+  const unexpected = async () => { throw new Error("Unexpected financial reconciliation"); };
+  const result = await reconcileDirectBookingDirectChargeFinancialEvidence({
+    reservationRepository: { findUnique: unexpected, update: unexpected },
+    stripeClient: { paymentIntents: { retrieve: unexpected } },
+    event: {
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          payment_status: "unpaid",
+          metadata: { flow: "direct_booking", stripeChargeMode: "DIRECT_CHARGE" },
+        },
+      },
+    } as any,
+  });
+  assert.deepEqual(result, { handled: false, reason: "PAYMENT_NOT_PAID" });
 });
 
 test("host payout transactions stay scoped to the authenticated organization", () => {

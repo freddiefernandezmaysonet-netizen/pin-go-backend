@@ -119,39 +119,46 @@ export function extractDirectBookingStripeFinancialEvidence(
   };
 }
 
+function getDirectBookingFinancialReconciliationSkipReason(event: Stripe.Event) {
+  if (
+    event.type !== "checkout.session.completed" &&
+    event.type !== "checkout.session.async_payment_succeeded"
+  ) {
+    return "EVENT_TYPE_NOT_SUPPORTED" as const;
+  }
+
+  const session = event.data.object as Stripe.Checkout.Session;
+  if (String(session.metadata?.flow ?? "").trim() !== "direct_booking") {
+    return "FLOW_NOT_DIRECT_BOOKING" as const;
+  }
+
+  if (String(session.metadata?.stripeChargeMode ?? "").trim() !== "DIRECT_CHARGE") {
+    return "NOT_DIRECT_CHARGE" as const;
+  }
+
+  if (session.payment_status !== "paid") {
+    return "PAYMENT_NOT_PAID" as const;
+  }
+
+  return null;
+}
+
+export function shouldReconcileDirectBookingFinancialEvidence(event: Stripe.Event) {
+  return getDirectBookingFinancialReconciliationSkipReason(event) === null;
+}
+
 export async function reconcileDirectBookingDirectChargeFinancialEvidence(input: {
   reservationRepository: ReservationFinancialRepository;
   stripeClient: StripePaymentIntentClient;
   event: Stripe.Event;
   now?: Date;
 }) {
-  if (input.event.type !== "checkout.session.completed") {
-    return {
-      handled: false as const,
-      reason: "EVENT_TYPE_NOT_SUPPORTED" as const,
-    };
+  const skipReason = getDirectBookingFinancialReconciliationSkipReason(input.event);
+  if (skipReason) {
+    return { handled: false as const, reason: skipReason };
   }
 
   const session = input.event.data.object as Stripe.Checkout.Session;
-  const flow = String(session.metadata?.flow ?? "").trim();
-  const stripeChargeMode = String(
-    session.metadata?.stripeChargeMode ?? ""
-  ).trim();
-
-  if (flow !== "direct_booking") {
-    return {
-      handled: false as const,
-      reason: "FLOW_NOT_DIRECT_BOOKING" as const,
-    };
-  }
-
-  if (stripeChargeMode !== "DIRECT_CHARGE") {
-    return {
-      handled: false as const,
-      reason: "NOT_DIRECT_CHARGE" as const,
-    };
-  }
-
   const reservation = await input.reservationRepository.findUnique({
     where: {
       stripeCheckoutSessionId: session.id,

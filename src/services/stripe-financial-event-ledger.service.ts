@@ -1,6 +1,9 @@
 import type Stripe from "stripe";
 import type { PrismaClient } from "@prisma/client";
-import { reconcileDirectBookingDirectChargeFinancialEvidence } from "./direct-booking-stripe-financial-evidence.service.js";
+import {
+  reconcileDirectBookingDirectChargeFinancialEvidence,
+  shouldReconcileDirectBookingFinancialEvidence,
+} from "./direct-booking-stripe-financial-evidence.service.js";
 
 const FINANCIAL_EVENT_PREFIXES = [
   "checkout.session.",
@@ -44,28 +47,6 @@ export function isStripeFinancialLedgerEventType(type: string) {
 
 function serializeStripeEvent(event: Stripe.Event) {
   return JSON.parse(JSON.stringify(event));
-}
-
-function asRecord(value: unknown): Record<string, any> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, any>;
-}
-
-function isDirectBookingDirectChargeCheckoutEvent(event: Stripe.Event) {
-  if (event.type !== "checkout.session.completed") {
-    return false;
-  }
-
-  const object = asRecord(event.data?.object);
-  const metadata = asRecord(object?.metadata);
-
-  return (
-    String(metadata?.flow ?? "").trim() === "direct_booking" &&
-    String(metadata?.stripeChargeMode ?? "").trim() === "DIRECT_CHARGE"
-  );
 }
 
 async function getDirectBookingStripeClient(
@@ -212,7 +193,7 @@ export async function markStripeFinancialEventProcessed(
 
   const event = existing?.payload as Stripe.Event | undefined;
 
-  if (event && isDirectBookingDirectChargeCheckoutEvent(event)) {
+  if (event && shouldReconcileDirectBookingFinancialEvidence(event)) {
     if (!db.reservation) {
       throw new Error(
         "STRIPE_FINANCIAL_LEDGER_RESERVATION_REPOSITORY_REQUIRED"
