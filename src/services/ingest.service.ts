@@ -15,6 +15,7 @@ import { capturePinAIReservationService } from "../pin-ai/reservation-service-ev
 import crypto from "crypto";
 import { resolveIngestGuestLanguage } from "./guest-language-ingest.policy";
 import { runIngestTransaction, assertDirectBookingIngestAvailability } from "./direct-booking-ingest-transaction";
+import { claimPaidDirectBookingIngest, type PaidDirectBookingCheckoutScope } from "./direct-booking-checkout-outcome.service.js";
 import { recordChannexAvailabilityConflict } from "./channex-availability-conflict.service";
 import { computeCleaningWindowPR } from "../services/cleaningWindow.service";
 import { reconcileReservation } from "./reservation.reconcile.service";
@@ -147,7 +148,10 @@ function buildLocalDateFromDateOnly(
   return fromZonedTime(localDateTime, timezone);
 }
 
-export async function ingestReservation(p: IngestPayload) {
+export async function ingestReservation(
+  p: IngestPayload,
+  paidCheckoutScope?: PaidDirectBookingCheckoutScope
+) {
   const property = await prisma.property.findUnique({
   where: { id: p.propertyId },
   select: {
@@ -210,6 +214,9 @@ export async function ingestReservation(p: IngestPayload) {
   const externalId = (p.externalId ?? "").trim() || null;
 
     const result: IngestReservationResult = await runIngestTransaction(prisma, p.source, async (tx) => {
+    if (p.source === "DIRECT_BOOKING" && paidCheckoutScope) {
+      await claimPaidDirectBookingIngest(tx, paidCheckoutScope, p.propertyId, externalId, externalProvider);
+    }
     const ingestKey = buildIngestKey({
       source: p.source,
       propertyId: p.propertyId,

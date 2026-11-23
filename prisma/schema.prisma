@@ -3845,3 +3845,19 @@ model DirectBookingPricingSnapshot {
   createdAt DateTime @default(now())
   @@index([propertyId, createdAt])
 }
+
+enum DirectBookingCheckoutDecision {
+  BOOKED
+  REVIEW
+}
+
+/// One atomic database outcome per verified connected account + paid Checkout.
+/// Both keys are hashes. No guest details or raw Stripe identifiers are stored.
+model DirectBookingCheckoutOutcome {
+  key             String                        @id
+  decision        DirectBookingCheckoutDecision
+  organizationId  String
+  propertyId      String
+  bookingEventKey String?
+  createdAt       DateTime                      @default(now())
+}

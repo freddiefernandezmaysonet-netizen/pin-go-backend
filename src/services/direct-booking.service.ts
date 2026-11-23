@@ -11,6 +11,10 @@ import {
 import stripe from "../billing/stripe";
 import { checkPropertyAvailability } from "./availability.service";
 import { ingestReservation } from "./ingest.service";
+import {
+  findOwnedPaidDirectBookingIngest,
+  type PaidDirectBookingCheckoutScope,
+} from "./direct-booking-checkout-outcome.service.js";
 import { calculateDirectBookingPricing } from "./direct-booking-pricing.service";
 import { auditReservationCompleteFlowSafe } from "./reservation-complete-flow-audit.service";
 import { sendLoggedEmail } from "./email-delivery.service";
@@ -467,7 +471,8 @@ function getCancellationRefundRulesForEmail(snapshot: any) {
 }
 
 export async function handleDirectBookingCheckoutCompleted(
-  session: Stripe.Checkout.Session
+  session: Stripe.Checkout.Session,
+  paidCheckoutScope?: PaidDirectBookingCheckoutScope
 ) {
   if (session.metadata?.flow !== "direct_booking") {
     return null;
@@ -718,10 +723,14 @@ if (
     throw new Error("DIRECT_BOOKING_PROPERTY_NOT_FOUND_OR_NOT_PUBLIC");
   }
 
+  const ownedIngested = paidCheckoutScope
+    ? await findOwnedPaidDirectBookingIngest(prisma, paidCheckoutScope, checkIn, checkOut)
+    : null;
   const availability = await checkPropertyAvailability({
     propertyId: property.id,
     checkIn,
     checkOut,
+    ...(ownedIngested ? { excludeReservationId: ownedIngested.id } : {}),
   });
 
   if (!availability.available) {
@@ -951,7 +960,9 @@ const pricingBreakdown = pricingSnapshotId
       amountTotal: session.amount_total, currency: session.currency })
   : await calculateDirectBookingPricing({ propertyId: property.id, checkIn, checkOut, selectedAmenityIds });
 
-const ingestResult = await ingestReservation({
+const ingestResult = ownedIngested
+  ? { reservationId: ownedIngested.id }
+  : await ingestReservation({
   source: "DIRECT_BOOKING",
 
   propertyId: property.id,
@@ -991,7 +1002,7 @@ const ingestResult = await ingestReservation({
  },
 
   status: "ACTIVE",
-});
+}, paidCheckoutScope);
 
 const guestToken = await getOrCreateReservationGuestToken(
   ingestResult.reservationId

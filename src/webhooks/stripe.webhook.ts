@@ -12,6 +12,14 @@ import {
 import stripe from "../billing/stripe";
 import syncTuyaEntitlementFromStripeEvent from "../billing/stripe/stripe.tuya.entitlement";
 import { handleDirectBookingCheckoutCompleted } from "../services/direct-booking.service";
+import {
+  getPaidDirectBookingCheckoutScope,
+  PAID_CHECKOUT_REVIEW_WON,
+} from "../services/direct-booking-checkout-outcome.service.js";
+import {
+  acknowledgeExistingPaidDirectBookingConflict,
+  recordPaidDirectBookingConflict,
+} from "../services/direct-booking-paid-conflict.service.js";
 import { handleGuestReservationModificationCheckoutPaid } from "../services/guest-reservation-modification-payment.service";
 import { handleStayTimePaymentEvent } from "../services/stay-time-payment-event.service.js";
 import { processStayTimePayment } from "../services/stay-time-payment-flow.service.js";
@@ -45,20 +53,41 @@ async function handleModificationPaymentEvent(event: Stripe.Event, session: Stri
   return handleGuestReservationModificationCheckoutPaid(session);
 }
 
-async function fulfillDirectBooking(session: Stripe.Checkout.Session) {
+async function fulfillDirectBooking(
+  event: Stripe.Event,
+  session: Stripe.Checkout.Session
+): Promise<boolean> {
   if (session.payment_status !== "paid") {
     console.log("[DIRECT_BOOKING_PAYMENT_NOT_PAID]", {
       sessionId: session.id,
       paymentStatus: session.payment_status,
     });
-    return;
+    return false;
   }
 
-  const reservation = await handleDirectBookingCheckoutCompleted(session);
-  console.log("✅ direct booking reservation completed", {
-    sessionId: session.id,
-    reservationId: reservation?.id ?? null,
-  });
+  if (await acknowledgeExistingPaidDirectBookingConflict(prisma, event, session)) {
+    return true;
+  }
+
+  try {
+    const reservation = await handleDirectBookingCheckoutCompleted(
+      session, getPaidDirectBookingCheckoutScope(event, session) ?? undefined
+    );
+    console.log("✅ direct booking reservation completed", {
+      sessionId: session.id,
+      reservationId: reservation?.id ?? null,
+    });
+    return false;
+  } catch (error) {
+    if (error instanceof Error && error.message === PAID_CHECKOUT_REVIEW_WON &&
+      await acknowledgeExistingPaidDirectBookingConflict(prisma, event, session)) {
+      return true;
+    }
+    if (await recordPaidDirectBookingConflict(prisma, event, session, error)) {
+      return true;
+    }
+    throw error;
+  }
 }
 
 export function registerStripeWebhook(app: Express) {
@@ -148,7 +177,9 @@ export function registerStripeWebhook(app: Express) {
            const flow = String(session.metadata?.flow ?? "").trim();
 
            if (flow === "direct_booking") {
-             await fulfillDirectBooking(session);
+             if (await fulfillDirectBooking(event, session)) {
+               return res.json({ received: true, type: event.type });
+             }
 
              break;
            }
@@ -198,7 +229,9 @@ export function registerStripeWebhook(app: Express) {
             const flow = String(session.metadata?.flow ?? "").trim();
 
             if (flow === "direct_booking") {
-              await fulfillDirectBooking(session);
+              if (await fulfillDirectBooking(event, session)) {
+                return res.json({ received: true, type: event.type });
+              }
               break;
             }
 

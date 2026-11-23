@@ -1,0 +1,56 @@
+name: Direct Booking Paid Outcome PostgreSQL Lab
+on:
+  push:
+    branches:
+      - lab/direct-booking-paid-outcome-postgres-20261123
+permissions:
+  contents: read
+jobs:
+  native-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-fixture-only
+          POSTGRES_DB: pingo_paid_conflict_test
+        ports:
+          - '5432:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pingo_paid_conflict_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:synthetic-fixture-only@127.0.0.1:5432/pingo_paid_conflict_test
+      PAID_CONFLICT_TEST_DATABASE_URL: postgresql://postgres:synthetic-fixture-only@127.0.0.1:5432/pingo_paid_conflict_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Initialize exact pre-change schema in the disposable database
+        run: |
+          test "$DATABASE_URL" = "$PAID_CONFLICT_TEST_DATABASE_URL"
+          test "$DATABASE_URL" = 'postgresql://postgres:synthetic-fixture-only@127.0.0.1:5432/pingo_paid_conflict_test'
+          git show 7cbb129706123ce51c3dd6f00e0bc898dc91bd9d:prisma/schema.prisma > "$RUNNER_TEMP/pre-outcome.prisma"
+          ./node_modules/.bin/prisma db push --skip-generate --schema "$RUNNER_TEMP/pre-outcome.prisma"
+      - name: Apply actual additive SQL and verify the outcome constraint
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$POSTGRES_CONTAINER"
+          docker exec -i "$POSTGRES_CONTAINER" psql -U postgres -d pingo_paid_conflict_test -v ON_ERROR_STOP=1 < prisma/migrations/20261123030000_direct_booking_checkout_outcome/migration.sql
+          CHECK_NAME="$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d pingo_paid_conflict_test -At -v ON_ERROR_STOP=1 -c "SELECT conname FROM pg_constraint WHERE conrelid = '\"DirectBookingCheckoutOutcome\"'::regclass AND contype = 'c' AND convalidated")"
+          test "$CHECK_NAME" = 'DirectBookingCheckoutOutcome_booking_owner_check'
+      - name: Generate and validate the candidate Prisma client
+        run: |
+          ./node_modules/.bin/prisma generate
+          ./node_modules/.bin/prisma validate
+      - name: Run both payment outcome orderings and rollback races against PostgreSQL
+        run: node --import tsx --test --test-concurrency=1 src/services/direct-booking-checkout-outcome.db.test.ts
