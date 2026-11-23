@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "prisma/schema.prisma"
+      - "prisma/migrations/20261123130000_message_delivery_receipt_processing/**"
+      - "src/services/message-delivery-receipt-recovery*"
+      - "src/workers/message-delivery-receipt-recovery.worker.ts"
       - "prisma/migrations/20261123014500_message_delivery_account_binding/**"
       - "src/services/message-delivery-account-binding*"
       - "prisma/migrations/20261123013000_message_delivery_receipt_capture/**"
@@ -71,6 +74,7 @@ jobs:
           src/services/guest-journey-communications-delivery-outcome.db.test.ts
           src/services/message-delivery-receipt-capture.db.test.ts
           src/services/message-delivery-account-binding.db.test.ts
+          src/services/message-delivery-receipt-recovery.db.test.ts
 
       - name: PostgreSQL provider retry eligibility
         run: >-
