@@ -1704,6 +1704,7 @@ model MessageLog {
   body              String
   provider          String
   providerMessageId String?
+  providerAccountKey String?
   status            String?
   providerDeliveryStatus String?
   providerStatusUpdatedAt DateTime?
@@ -1730,6 +1731,7 @@ model MessageLog {
   @@index([organizationId, propertyId, createdAt])
   @@index([organizationId, status, retryCount, createdAt])
   @@index([provider, providerMessageId])
+  @@index([provider, providerAccountKey, providerMessageId], map: "MessageLog_provider_account_message_idx")
   @@index([providerDeliveryStatus, providerStatusUpdatedAt])
 }
 

@@ -1,3 +1,4 @@
+import { deliveryAccountBindingEnabled } from "../../services/message-delivery-account-binding.service";
 // src/integrations/twilio/twilio.client.ts
 import Twilio from "twilio";
 
@@ -83,6 +84,8 @@ function getTwilioEnv() {
 
 export async function sendSms(to: string, body: string) {
   const { ACCOUNT_SID, API_KEY, API_SECRET, FROM } = getTwilioEnv();
+  const bindAccount = deliveryAccountBindingEnabled();
+  if (bindAccount && !/^AC[a-f0-9]{32}$/i.test(ACCOUNT_SID)) throw Error("DELIVERY_ACCOUNT_SID_INVALID");
 
   const client = Twilio(API_KEY, API_SECRET, {
     accountSid: ACCOUNT_SID,
@@ -100,5 +103,5 @@ export async function sendSms(to: string, body: string) {
       : {}),
   });
 
-  return { sid: msg.sid, status: msg.status };
+  return { sid: msg.sid, status: msg.status, ...(bindAccount ? { deliveryAccountKey: ACCOUNT_SID } : {}) };
 }
