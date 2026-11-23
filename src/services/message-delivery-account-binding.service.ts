@@ -32,6 +32,7 @@ export async function resolveCapturedReceiptMessage(
   if (!matches.length) return { state: "UNBOUND_OR_UNKNOWN" as const };
   if (matches.length !== 1) return { state: "AMBIGUOUS" as const };
   const message = matches[0];
+  if (!message) return { state: "UNBOUND_OR_UNKNOWN" as const };
   if (!message.organizationId || !message.propertyId || !await db.property.findFirst({
     where: { id: message.propertyId, organizationId: message.organizationId }, select: { id: true },
   })) return { state: "SCOPE_MISMATCH" as const };
