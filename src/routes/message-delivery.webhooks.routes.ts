@@ -1,3 +1,4 @@
+import { captureVerifiedDeliveryReceipt } from "../services/message-delivery-receipt-capture.service";
 import { Router } from "express";
 import type { PrismaClient } from "@prisma/client";
 import Twilio from "twilio";
@@ -140,6 +141,7 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
+        await captureVerifiedDeliveryReceipt(prisma, outcome, { eventId: svixId }, env);
         const result =
           await recordMessageDeliveryOutcome(
             prisma,
@@ -224,6 +226,7 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
+        await captureVerifiedDeliveryReceipt(prisma, outcome, { accountSid: clean(req.body?.AccountSid) }, env);
         await recordMessageDeliveryOutcome(
           prisma,
           outcome
@@ -259,3 +262,4 @@ export const __messageDeliveryWebhookInternals = {
   publicApiBaseUrl,
   twilioCallbackUrl,
 };
+
