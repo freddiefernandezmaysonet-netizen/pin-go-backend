@@ -630,3 +630,14 @@ test("first email stores its Resend account beside acceptance without declaring 
   assert.equal(f.message.providerMessageId, "EM-account");
   assert.equal(f.message.deliveredAt, null);
 });
+
+test("real first-send transport refuses an unapproved destination before dispatch", async () => {
+  const fixture = fakePrisma({ message: { status: "APMS_PENDING", to: "unapproved@example.invalid" },
+    reservation: firstSendReservation });
+  const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"}, "REQUEST_COMMUNICATION");
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent, firstSendOptions);
+  assert.equal(result.providerCalls, 0);
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  assert.equal(result.completion.errorCode, "COMMUNICATION_FIRST_SEND_OUTSIDE_CANARY");
+  assert.equal(fixture.updates.length, 0);
+});

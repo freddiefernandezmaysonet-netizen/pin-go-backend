@@ -375,6 +375,17 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       errorCode: reason, errorDetail: "First-send completion requires current eligibility and a correlated delivery receipt; no blind replay.",
     },
   });
+  if (firstSend && dependencies === DEFAULT_DEPENDENCIES) {
+    const approvedRecipient = requestedChannel === "sms"
+      ? process.env.GUEST_JOURNEY_CANARY_SMS
+      : process.env.GUEST_JOURNEY_CANARY_EMAIL;
+    if (!approvedRecipient || approvedRecipient !== message.to ||
+        claim.organizationId !== process.env.GUEST_JOURNEY_CANARY_ORGANIZATION_ID ||
+        claim.propertyId !== process.env.GUEST_JOURNEY_CANARY_PROPERTY_ID ||
+        claim.reservationId !== process.env.GUEST_JOURNEY_CANARY_RESERVATION_ID) {
+      return pendingReceipt(0, "COMMUNICATION_FIRST_SEND_OUTSIDE_CANARY");
+    }
+  }
   if (firstSend) {
     const blocked = firstPrecheckinBlockReason(reservation, requestedChannel as "email" | "sms", now);
     if (blocked) return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
