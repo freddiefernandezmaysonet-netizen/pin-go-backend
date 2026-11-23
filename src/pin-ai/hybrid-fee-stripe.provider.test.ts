@@ -31,6 +31,7 @@ test("actual public checkout metadata fits Stripe's limit with hybrid consent an
       pinAITermsAcceptedBy: "host", pinAITermsAcceptedAt: "2030-01-01T00:00:00Z" } : {};
     const values = runInNewContext(`(${expression})`, {
       pinAIFeeMetadata: consent, pinAIFeeAmountCents: enabled ? 100 : 0,
+      pricingSnapshot: { id: "snapshot_test" },
       normalizedPreferredLanguage: "es", property: { id: "p", organizationId: "org" },
       stayDates: { checkIn: new Date("2030-01-02"), checkOut: new Date("2030-01-03"), timeZone: "UTC", checkInTime: "16:00", checkOutTime: "11:00" },
       guestName: "Synthetic", guestEmail: "synthetic@example.com", guestPhone: "", stayNotificationsConsent: false,
@@ -47,6 +48,7 @@ test("actual public checkout metadata fits Stripe's limit with hybrid consent an
     // The billing wrapper removes this derived key and adds charge mode.
     delete values.hostPayoutStatus; values.stripeChargeMode = "DIRECT_CHARGE";
     assert.equal(Object.keys(values).length, 50);
+    assert.equal(values.pricingSnapshotId, "snapshot_test");
     assert.deepEqual(JSON.parse(values.cancellationPolicySnapshot), policy);
     assert.equal(values.guestAcceptedCancellationTerms, "true");
     assert.equal(values.securePrecheckinAccepted, "true");
