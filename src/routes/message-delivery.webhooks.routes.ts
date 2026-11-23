@@ -141,7 +141,10 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
-        await captureVerifiedDeliveryReceipt(prisma, outcome, { eventId: svixId }, env);
+        const receipt = await captureVerifiedDeliveryReceipt(prisma, outcome, { eventId: svixId }, env);
+        if (receipt.retained) {
+          return res.status(200).json({ ok: true, retained: true, matched: false, applied: false });
+        }
         const result =
           await recordMessageDeliveryOutcome(
             prisma,
@@ -226,7 +229,8 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
-        await captureVerifiedDeliveryReceipt(prisma, outcome, { accountSid: clean(req.body?.AccountSid) }, env);
+        const receipt = await captureVerifiedDeliveryReceipt(prisma, outcome, { accountSid: clean(req.body?.AccountSid) }, env);
+        if (receipt.retained) return res.status(204).send();
         await recordMessageDeliveryOutcome(
           prisma,
           outcome

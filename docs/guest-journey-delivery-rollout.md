@@ -11,7 +11,7 @@ Passing simulation does not establish live provider delivery or production first
 - Review all production changes in the aggregate diff, including changes inherited from the lab branch (mission control, pre-check-in timing and delivery adapter).
 - Confirm the production first-send materializer, owner-cycle invocation and E7 reconciliation scheduling. The tested lab entry points are not a production scheduler; receipt recovery updates delivery evidence but does not itself complete an E7 intent.
 - Confirm the account namespace used for sending matches verified webhook capture. Resend namespaces are server-owned, stable per account and never reused for another account.
-- Review the webhook path: existing direct outcome recording is retained for compatibility and is not automatically made account-scoped by enabling capture. Resolve or explicitly constrain this path before treating account isolation as an end-to-end production guarantee.
+- In CAPTURE mode both verified webhook handlers retain the receipt and acknowledge it. The recovery worker applies it after a unique account and tenant match. OFF preserves legacy immediate recording. Capture affects the entire endpoint. Use an isolated callback endpoint for the canary, or verify binding coverage for all its traffic first. Historical unbound messages stay pending.
 - Resolve the unrelated OTA narrow-file certification and Mobile Access createUser contract failures through their respective owners. Do not change Channex certification to bypass them.
 - Require a production canary restricted to the two recipient destinations provided privately in the conversation. Do not put personal contact data or secrets in source control.
 

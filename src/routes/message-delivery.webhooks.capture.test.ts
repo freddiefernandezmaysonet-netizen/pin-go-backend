@@ -56,11 +56,12 @@ test("real webhook handlers authenticate before durable capture and preserve def
   assert.equal((await twilio(account, false)).status, 403);
   assert.equal(rows.size, 0); assert.equal(legacyReads, 0);
   const first = await resend("event-1");
-  assert.equal(first.status, 200); assert.equal((await first.json()).matched, false);
+  assert.equal(first.status, 200); assert.deepEqual(await first.json(), {ok: true, retained: true, matched: false, applied: false});
   assert.equal((await resend("event-1")).status, 200); assert.equal(rows.size, 1);
   assert.equal((await twilio(account)).status, 204);
   assert.equal((await twilio(account)).status, 204); assert.equal(rows.size, 2);
   assert.equal((await twilio("AC" + "3".repeat(32))).status, 500); assert.equal(rows.size, 2);
+  assert.equal(legacyReads, 0, "captured callbacks must never look up a message by provider ID alone");
   const persisted = JSON.stringify([...rows.values()]);
   assert.doesNotMatch(persisted, /private@example|Do not retain|15005550006|synthetic-twilio-token/);
   databaseFails = true;
@@ -68,6 +69,8 @@ test("real webhook handlers authenticate before durable capture and preserve def
   databaseFails = false;
   env.MESSAGE_DELIVERY_RECEIPT_INBOX_MODE = "OFF";
   assert.equal((await resend("legacy-only")).status, 200); assert.equal(rows.size, 2);
+  assert.equal((await twilio(account)).status, 204);
+  assert.equal(legacyReads, 2, "both providers preserve immediate recording when capture is off");
   env.MESSAGE_DELIVERY_RECEIPT_INBOX_MODE = "INVALID";
   assert.equal((await resend("invalid-mode")).status, 500); assert.equal(rows.size, 2);
   env.MESSAGE_DELIVERY_RECEIPT_INBOX_MODE = "CAPTURE";
