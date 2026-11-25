@@ -327,6 +327,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
         status: true,
         paymentState: true,
         createdAt: true,
+        propertyId: true,
         externalRaw: true,
         source: true,
         externalProvider: true,
@@ -343,6 +344,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
         property: {
           select: {
             name: true,
+            status: true,
             timezone: true,
           },
         },
@@ -387,7 +389,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     }
   }
   if (firstSend) {
-    const blocked = firstPrecheckinBlockReason(reservation, requestedChannel as "email" | "sms", now);
+    const blocked = firstPrecheckinBlockReason(reservation, requestedChannel as "email" | "sms", now, dependencies === DEFAULT_DEPENDENCIES);
     if (blocked) return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
   }
 
@@ -563,6 +565,8 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       status: true,
       paymentState: true,
       createdAt: true,
+      propertyId: true,
+      property: {select: {status: true}},
       externalRaw: true,
       source: true,
       externalProvider: true,
@@ -582,7 +586,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw new Error("COMMUNICATION_CANARY_CHANGED_BEFORE_SEND");
   }
   if (firstSend) {
-    const blocked = firstPrecheckinBlockReason(currentReservation, requestedChannel as "email" | "sms", now);
+    const blocked = firstPrecheckinBlockReason(currentReservation, requestedChannel as "email" | "sms", now, dependencies === DEFAULT_DEPENDENCIES);
     if (blocked) {
       const restored = await prisma.messageLog.updateMany({ where: { id: message.id, status: "E7_SENDING" },
         data: { status: "APMS_PENDING", error: `COMMUNICATION_FIRST_SEND_${blocked}` } });
