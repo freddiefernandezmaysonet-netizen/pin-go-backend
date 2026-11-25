@@ -27,7 +27,7 @@ export async function materializeScopedPrecheckin(
     const decisions: Array<{ channel: string; action: string; messageLogId?: string }> = [];
     for (const channel of ["email", "sms"] as const) {
       if (canary && canary[channel] !== (channel === "email" ? r.guestEmail : r.guestPhone)?.trim()) continue;
-      const blocked = firstPrecheckinBlockReason(r, channel, now);
+      const blocked = firstPrecheckinBlockReason(r, channel, now, Boolean(canary));
       if (blocked) { decisions.push({ channel, action: blocked }); continue; }
       const prior = previous.filter(message => message.channel === channel);
       if (prior.length || r.messageDispatchLogs.some(row => row.channel === channel)) {

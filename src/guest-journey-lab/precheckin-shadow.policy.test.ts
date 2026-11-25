@@ -1,3 +1,5 @@
+import { firstPrecheckinBlockReason } from "../services/guest-journey-communications-precheckin.policy";
+import { INTERNAL_DEMO_PROPERTY_ID, INTERNAL_DEMO_SOURCE, INTERNAL_DEMO_PROVIDER } from "../services/internal-demo-scope";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { planPrecheckinShadow, type PrecheckinSnapshot } from "./precheckin-shadow.policy";
@@ -79,4 +81,18 @@ test("invalid scope and dates fail visibly", () => {
   assert.throws(() => plan({ organizationId: "" }), /SCOPE_REQUIRED/);
   assert.throws(() => plan({ checkIn: new Date("invalid") }), /DATES_INVALID/);
   assert.throws(() => plan({ checkOut: base.checkIn }), /DATES_INVALID/);
+});
+
+test("the scoped pilot accepts a canonical Demo Center booking and requires its explicit SMS opt-in", () => {
+  const demo = {...base, propertyId: INTERNAL_DEMO_PROPERTY_ID, property: {status: "ACTIVE"},
+    source: INTERNAL_DEMO_SOURCE, externalProvider: INTERNAL_DEMO_PROVIDER, externalId: "DEMO-test",
+    externalRaw: {demo: true, paymentSimulated: true,
+      consent: {consentSource: "INTERNAL_DEMO_CENTER", smsConsent: true, stayNotificationsConsent: true}}};
+  assert.equal(firstPrecheckinBlockReason(demo, "email", now), "EXTERNAL_OWNER_REQUIRED");
+  assert.equal(firstPrecheckinBlockReason(demo, "email", now, true), null);
+  assert.equal(firstPrecheckinBlockReason(demo, "sms", now, true), null);
+  assert.equal(firstPrecheckinBlockReason({...demo, propertyId: "another-property"}, "email", now, true), "EXTERNAL_OWNER_REQUIRED");
+  assert.equal(firstPrecheckinBlockReason({...demo, source: "Airbnb"}, "email", now, true), "EXTERNAL_OWNER_REQUIRED");
+  assert.equal(firstPrecheckinBlockReason({...demo, externalRaw: {...demo.externalRaw,
+    consent: {...demo.externalRaw.consent, smsConsent: false}}}, "sms", now, true), "SMS_NOT_ELIGIBLE");
 });
