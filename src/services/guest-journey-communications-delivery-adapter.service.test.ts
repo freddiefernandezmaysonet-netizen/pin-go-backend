@@ -46,7 +46,9 @@ function fakePrisma(input: {
     retryCount: 0,
     to: "+17875550101",
     body: "Existing canonical body",
-    providerMessageId: null,
+    providerMessageId: null as string | null,
+    providerAccountKey: null as string | null,
+    deliveredAt: null as Date | null,
     error: "provider failed",
     ...input.message,
   };
@@ -79,10 +81,14 @@ function fakePrisma(input: {
         if (args.where.status !== undefined && args.where.status !== message.status) {
           return { count: 0 };
         }
+        if (args.where.providerMessageId !== undefined && args.where.providerMessageId !== message.providerMessageId) {
+          return { count: 0 };
+        }
         if (args.data.status) message.status = args.data.status;
         if (args.data.providerMessageId !== undefined) {
           message.providerMessageId = args.data.providerMessageId;
         }
+        if (args.data.providerAccountKey !== undefined) message.providerAccountKey = args.data.providerAccountKey;
         if (args.data.error !== undefined) message.error = args.data.error;
         if (args.data.retryCount?.increment) message.retryCount += args.data.retryCount.increment;
         return { count: 1 };
@@ -95,6 +101,108 @@ function fakePrisma(input: {
 const noEmail = async () => {
   throw new Error("email must not execute");
 };
+
+const firstSendReservation = {
+  status: "ACTIVE", source: "DIRECT_BOOKING", externalProvider: null, externalId: null,
+  paymentState: "PAID", cancelledAt: null, createdAt: new Date(now.getTime() - 86400000),
+  checkIn: new Date(now.getTime() + 3600000), checkOut: new Date(now.getTime() + 86400000),
+  guestEmail: "guest@example.com", guestPhone: "+17875550101",
+  externalRaw: { consent: { smsConsent: true, acceptedAt: "2026-08-01T00:00:00Z" } },
+};
+const firstSendOptions = { now, firstSendContract: "PRECHECKIN_DELIVERY_V1" as const };
+
+test("certified first SMS permits legacy catch-up but acceptance never closes delivery or repeats", async () => {
+  for (const checkIn of [firstSendReservation.checkIn, new Date(now.getTime() - 3600000)]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" }, reservation: { ...firstSendReservation, checkIn } });
+    const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION");
+    let calls = 0;
+    const deps = { sendSms: async () => { calls++; return { sid: "SM-first", status: "queued" as const }; }, sendEmail: noEmail };
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, firstSendOptions, deps);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(f.message.status, "E7_SENDING");
+    assert.equal(f.message.providerMessageId, "SM-first");
+    assert.equal(f.message.deliveredAt, null);
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, firstSendOptions, deps);
+    assert.equal(calls, 1);
+  }
+});
+
+test("first email preserves late-booking eligibility and rejects the older booking after arrival", async () => {
+  for (const lateBooking of [false, true]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING", channel: "email", to: "guest@example.com",
+      body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: "PRECHECKIN", retryPayload: {} }) },
+      reservation: { ...firstSendReservation, checkIn: new Date(now.getTime() - 3600000),
+        createdAt: lateBooking ? now : firstSendReservation.createdAt } });
+    let calls = 0;
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "email" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("unexpected SMS"); }, sendEmail: async () => { calls++; return { data: { id: "EM-first" } }; } });
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(calls, lateBooking ? 1 : 0);
+  }
+});
+
+test("first-send recheck prevents withdrawn consent, payment loss and inactive reservations reaching a provider", async () => {
+  for (const patch of [{ externalRaw: null }, { paymentState: "NONE" }, { status: "CANCELLED" }, { cancelledAt: now }]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" },
+      reservationSequence: [firstSendReservation, { ...firstSendReservation, ...patch }] });
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("must not send"); }, sendEmail: noEmail });
+    assert.equal(result.providerCalls, 0);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(f.message.status, "APMS_PENDING");
+  }
+});
+
+test("strict first-send rejects OTA, not-due and expired reservations without declaring delivery", async () => {
+  for (const patch of [{ source: "Airbnb", externalProvider: "CHANNEX", externalId: "ota" },
+    { checkIn: new Date(now.getTime() + 5 * 3600000) },
+    { checkIn: new Date(now.getTime() - 86400000), checkOut: now }]) {
+    const f = fakePrisma({ message: { status: "APMS_PENDING" }, reservation: { ...firstSendReservation, ...patch } });
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }, "REQUEST_COMMUNICATION"), firstSendOptions,
+      { sendSms: async () => { throw Error("must not send"); }, sendEmail: noEmail });
+    assert.equal(result.providerCalls, 0);
+    assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  }
+});
+
+test("late provider acknowledgement is retained without delivery success or another send", async () => {
+  const f = fakePrisma({});
+  let resolve!: (value: any) => void;
+  let calls = 0;
+  const delivery = new Promise<any>(done => { resolve = done; });
+  const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" });
+  const deps = { sendSms: async () => { calls++; return delivery; }, sendEmail: noEmail };
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent,
+    { now, providerTimeoutMs: 5 }, deps);
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  resolve({ sid: " SM-late " });
+  await new Promise(done => setImmediate(done));
+  assert.equal(f.message.providerMessageId, "SM-late");
+  assert.equal(f.message.status, "E7_SENDING");
+  assert.equal(f.message.retryCount, 1);
+  assert.equal(f.message.deliveredAt, null);
+  await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, { now }, deps);
+  assert.equal(calls, 1);
+  assert.deepEqual(f.updates.at(-1).where.retryCount, { in: [0, 1] });
+});
+
+test("late response never overwrites an existing provider correlation", async () => {
+  const f = fakePrisma({});
+  let resolve!: (value: any) => void;
+  await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+    claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+    { now, providerTimeoutMs: 5 }, {
+      sendSms: () => new Promise<any>(done => { resolve = done; }), sendEmail: noEmail,
+    });
+  f.message.providerMessageId = "SM-canonical";
+  resolve({ sid: "SM-conflicting" });
+  await new Promise(done => setImmediate(done));
+  assert.equal(f.message.providerMessageId, "SM-canonical");
+  assert.equal(f.message.status, "E7_SENDING");
+});
 
 test("blocked Booking.com and Airbnb operational E7 retries never call SMS or email providers", async () => {
   const oldValue = process.env.OTA_GUEST_EXTERNAL_MESSAGING_BLOCKED_PROVIDERS;
@@ -186,6 +294,64 @@ test("a retry fences the message, preserves recipient/body, and persists provide
   assert.equal(message.retryCount, 1);
   assert.equal(result.providerCalls, 1);
   assert.equal(result.completion.kind, "SUCCEEDED");
+});
+
+test("missing, empty and non-string SMS acknowledgements remain uncertain without replay", async () => {
+  for (const providerResult of [{}, undefined, { sid: "" }, { sid: "   " }, { sid: 123 }, { sid: {} }]) {
+    const fixture = fakePrisma({});
+    let calls = 0;
+    const dependencies = {
+      sendSms: async () => { calls++; return providerResult as any; }, sendEmail: noEmail,
+    };
+    const intent = claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" });
+    const first = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent,
+      { now, providerTimeoutMs: 50 }, dependencies);
+    assert.equal(first.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(fixture.message.status, "E7_SENDING");
+    assert.equal(fixture.message.providerMessageId, null);
+    assert.equal(fixture.message.retryCount, 1);
+    assert.equal(fixture.message.error, "COMMUNICATION_PROVIDER_ACK_MISSING");
+    assert.ok(!fixture.updates.some(update => update.data.status === "SENT"));
+    const repeated = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent,
+      { now, providerTimeoutMs: 50 }, dependencies);
+    assert.equal(repeated.providerCalls, 0);
+    assert.equal(calls, 1);
+  }
+});
+
+test("email accepted-shaped responses without a message ID do not close delivery", async () => {
+  for (const result of [{ ok: true }, { data: { id: "" } }, { data: { id: null } }]) {
+    const fixture = fakePrisma({ message: {
+      channel: "email", to: "guest@example.com", communicationType: "DIRECT_BOOKING_GUEST_CONFIRMATION",
+      body: JSON.stringify({ kind: "PIN_GO_EMAIL_DELIVERY", type: "DIRECT_BOOKING_GUEST_CONFIRMATION", retryPayload: {} }),
+    } });
+    const delivered = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+      claim({ messageLogId: "message-1", communicationType: "DIRECT_BOOKING_GUEST_CONFIRMATION", channel: "email" }),
+      { now, providerTimeoutMs: 50 }, { sendSms: async () => { throw new Error("unexpected SMS"); }, sendEmail: async () => result });
+    assert.equal(delivered.completion.kind, "WAITING_FOR_EVIDENCE");
+    assert.equal(fixture.message.status, "E7_SENDING");
+  }
+});
+
+test("all existing valid provider identifier shapes are preserved", async () => {
+  for (const result of [{ sid: " SM-valid " }, { data: { id: "SM-valid" } }, { providerMessageId: "SM-valid" }, { id: "SM-valid" }]) {
+    const fixture = fakePrisma({});
+    const delivered = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+      claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+      { now, providerTimeoutMs: 50 }, { sendSms: async () => result as any, sendEmail: noEmail });
+    assert.equal(delivered.completion.kind, "SUCCEEDED");
+    assert.equal(fixture.message.providerMessageId, "SM-valid");
+  }
+});
+
+test("a definite provider rejection retains the existing FAILED retry path", async () => {
+  const fixture = fakePrisma({});
+  await assert.rejects(executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma,
+    claim({ messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms" }),
+    { now, providerTimeoutMs: 50 }, {
+      sendSms: async () => { throw new Error("Provider rejected before acceptance"); }, sendEmail: noEmail,
+    }), /Provider rejected before acceptance/);
+  assert.equal(fixture.message.status, "FAILED");
 });
 
 test("provider timeout leaves an ambiguity fence and blocks automatic duplicate replay", async () => {
@@ -384,4 +550,94 @@ test("queued Channex identity reminder becomes obsolete without contacting a pro
     { now }, { sendSms: async () => { throw new Error("must not send"); }, sendEmail: noEmail });
   assert.equal(result.providerCalls, 0);
   assert.equal(message.status, "OBSOLETE");
+});
+
+
+
+test("account provenance follows the transport response, including late acknowledgements", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  const account = "AC" + "a".repeat(32);
+  for (const late of [false, true]) {
+    const f = fakePrisma({});
+    let resolve!: (result: any) => void;
+    let calls = 0;
+    const response = {sid: "SM-bound", status: "queued" as const, deliveryAccountKey: account};
+    const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"});
+    const deps = {sendSms: async () => {
+      calls++;
+      return late ? new Promise<any>(done => {resolve = done;}) : response;
+    }, sendEmail: noEmail};
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now, providerTimeoutMs: 5}, deps);
+    if (late) {
+      process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "0";
+      resolve(response);
+      await new Promise(done => setImmediate(done));
+    }
+    assert.equal(f.message.providerAccountKey, account);
+    assert.equal(f.message.providerMessageId, "SM-bound");
+    const ack = f.updates.find(update => update.data.providerMessageId === "SM-bound");
+    assert.equal(ack.data.providerAccountKey, account, "account and identifier are persisted atomically");
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(calls, 1);
+    process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  }
+});
+
+test("missing account evidence holds the send fence; disabled binding clears stale provenance", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  for (const enabled of ["1", "0"]) {
+    process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = enabled;
+    const f = fakePrisma({message: {providerAccountKey: "AC" + "b".repeat(32)}});
+    let calls = 0;
+    const deps = {sendSms: async () => {calls++; return {sid: "SM-new", status: "queued" as const};}, sendEmail: noEmail};
+    const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"});
+    const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(f.message.providerAccountKey, null);
+    assert.equal(result.completion.kind, enabled === "1" ? "WAITING_FOR_EVIDENCE" : "SUCCEEDED");
+    assert.equal(f.message.status, enabled === "1" ? "E7_SENDING" : "SENT");
+    await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma, intent, {now}, deps);
+    assert.equal(calls, 1);
+  }
+});
+
+test("first email stores its Resend account beside acceptance without declaring delivery", async t => {
+  const original = process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+  t.after(() => {
+    if (original === undefined) delete process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED;
+    else process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = original;
+  });
+  process.env.MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED = "1";
+  const f = fakePrisma({message: {status: "APMS_PENDING", channel: "email", to: "guest@example.com",
+    body: JSON.stringify({kind: "PIN_GO_EMAIL_DELIVERY", type: "PRECHECKIN", retryPayload: {}})},
+    reservation: firstSendReservation});
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(f.prisma,
+    claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "email"}, "REQUEST_COMMUNICATION"),
+    firstSendOptions, {
+      sendSms: async () => {throw Error("unexpected SMS");},
+      sendEmail: async () => ({data: {id: "EM-account"}, deliveryAccountKey: "resend_account_1"}),
+    });
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  assert.equal(f.message.providerAccountKey, "resend_account_1");
+  assert.equal(f.message.providerMessageId, "EM-account");
+  assert.equal(f.message.deliveredAt, null);
+});
+
+test("real first-send transport refuses an unapproved destination before dispatch", async () => {
+  const fixture = fakePrisma({ message: { status: "APMS_PENDING", to: "unapproved@example.invalid" },
+    reservation: firstSendReservation });
+  const intent = claim({messageLogId: "message-1", communicationType: "PRECHECKIN", channel: "sms"}, "REQUEST_COMMUNICATION");
+  const result = await executeGuestJourneyCommunicationDeliveryAdapter(fixture.prisma, intent, firstSendOptions);
+  assert.equal(result.providerCalls, 0);
+  assert.equal(result.completion.kind, "WAITING_FOR_EVIDENCE");
+  assert.equal(result.completion.errorCode, "COMMUNICATION_FIRST_SEND_OUTSIDE_CANARY");
+  assert.equal(fixture.updates.length, 0);
 });

@@ -18,6 +18,14 @@ const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 const isProd = process.env.NODE_ENV === "production";
 
 const resend = resendApiKey ? new Resend(resendApiKey) : null;
+// Capture provenance with the client; later environment edits cannot relabel it.
+const resendDeliveryAccountKey = String(process.env.MESSAGE_DELIVERY_RESEND_ACCOUNT_KEY ?? "").trim();
+export function getResendDeliveryAccountKey(): string {
+  if (!resend || !/^[a-zA-Z0-9_-]{1,100}$/.test(resendDeliveryAccountKey)) {
+    throw new Error("DELIVERY_RESEND_ACCOUNT_UNCONFIGURED");
+  }
+  return resendDeliveryAccountKey;
+}
 
 // Durable incident notices require a real provider acknowledgement even outside production.
 export async function sendGuestIncidentHostNotice(input: GuestIncidentEmail): Promise<string> {

@@ -1,3 +1,4 @@
+import { runPrecheckinCanary } from "../services/guest-journey-precheckin-canary.service";
 import { runHybridFeeCycle } from "../pin-ai/hybrid-fee.service.js";
 import { createHybridFeeStripeProvider } from "../pin-ai/hybrid-fee-stripe.provider.js";
 import { formatPropertyArrivalLocation } from "../services/property-arrival-location.js";
@@ -422,13 +423,13 @@ async function processPreCheckinMessages(
                 guestEmail: {
                   not: null,
                 },
-                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "email", status: "SENT" } },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "email", status: { in: ["SENT", "E7_OWNED"] } } },
               },
               {
                 guestPhone: {
                   not: null,
                 },
-                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "sms", status: "SENT" } },
+                messageDispatchLogs: { none: { type: "PRECHECKIN", channel: "sms", status: { in: ["SENT", "E7_OWNED"] } } },
               },
             ],
           },
@@ -2782,6 +2783,11 @@ async function tick() {
       }
     }
 
+    try {
+      await runPrecheckinCanary(prisma, GUEST_JOURNEY_COMMUNICATIONS_OWNER_CONFIG, now);
+    } catch (error) {
+      errLog("Pre-checkin canary cycle failed", toErrString(error));
+    }
     try {
       await processCheckins(now);
       await processPreCheckinMessages(now);

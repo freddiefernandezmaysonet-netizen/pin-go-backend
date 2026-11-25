@@ -28,7 +28,7 @@ function getPublicApiUrl() {
     .replace(/\/+$/, "");
 }
 
-function buildGuestVerificationUrl(token: string) {
+export function buildGuestVerificationUrl(token: string) {
   return (
     `${getPublicApiUrl()}/guest/verify/` +
     encodeURIComponent(token)
@@ -56,7 +56,7 @@ function hasValidCoordinates(
   return true;
 }
 
-function buildGoogleMapsLink(input: {
+export function buildGoogleMapsLink(input: {
   latitude?: unknown;
   longitude?: unknown;
   address1?: string | null;
@@ -227,17 +227,21 @@ export async function sendPreCheckinEmail(
 ) {
   const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "PRECHECKIN");
   if (routed) return routed;
+  if (process.env.GUEST_JOURNEY_CANARY_EXECUTE === "1" &&
+      process.env.GUEST_JOURNEY_CANARY_RESERVATION_ID === reservationId) {
+    return { ok: true, skipped: true, status: "E7_OWNED" as const };
+  }
   const existing = await prisma.messageDispatchLog.findFirst({
     where: {
       reservationId,
       type: "PRECHECKIN",
       channel: "email",
-      status: "SENT",
+      status: { in: ["SENT", "E7_OWNED"] },
     },
   });
 
   if (existing) {
-    return { ok: true, skipped: true, status: "SENT" as const };
+    return { ok: true, skipped: true, status: existing.status };
   }
 
   const r = await prisma.reservation.findUnique({
@@ -385,6 +389,10 @@ export async function sendPreCheckinSms(
 ) {
   const routed = await deliverOtaOperationalCommunication(prisma, reservationId, "PRECHECKIN");
   if (routed) return routed;
+  if (process.env.GUEST_JOURNEY_CANARY_EXECUTE === "1" &&
+      process.env.GUEST_JOURNEY_CANARY_RESERVATION_ID === reservationId) {
+    return { ok: true, skipped: true, status: "E7_OWNED" as const };
+  }
   let retryBody: string | null = null;
   try {
     const existing = await prisma.messageDispatchLog.findFirst({
@@ -392,7 +400,7 @@ export async function sendPreCheckinSms(
         reservationId,
         type: "PRECHECKIN",
         channel: "sms",
-        status: "SENT",
+        status: { in: ["SENT", "E7_OWNED"] },
       },
     });
 

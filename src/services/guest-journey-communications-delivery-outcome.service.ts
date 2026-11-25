@@ -282,67 +282,85 @@ export function normalizeTwilioDeliveryCallback(
 
 export async function recordMessageDeliveryOutcome(
   prisma: PrismaClient,
-  outcome: ProviderDeliveryOutcome
+  outcome: ProviderDeliveryOutcome,
+  scope?: { messageLogId: string; accountKey: string; organizationId: string; propertyId: string }
 ) {
-  const existing = await prisma.messageLog.findFirst({
-    where: {
-      provider: outcome.provider,
-      providerMessageId: outcome.providerMessageId,
-    },
-    select: {
-      id: true,
-      providerDeliveryStatus: true,
-      deliveredAt: true,
-    },
-  });
-
-  if (!existing) {
-    return {
-      matched: false,
-      applied: false,
-      messageLogId: null as string | null,
-    };
+  if (!Number.isFinite(outcome.eventAt.getTime()) ||
+      (outcome.deliveredAt && !Number.isFinite(outcome.deliveredAt.getTime()))) {
+    throw new Error("COMMUNICATION_DELIVERY_EVENT_TIME_INVALID");
   }
 
-  if (
-    !shouldApplyProviderDeliveryTransition(
-      existing.providerDeliveryStatus,
-      outcome.status
-    )
-  ) {
-    return {
-      matched: true,
-      applied: false,
-      messageLogId: existing.id,
-    };
+  if (scope && [scope.messageLogId, scope.accountKey, scope.organizationId, scope.propertyId].some(value => typeof value !== "string" || !value.trim())) {
+    throw new Error("COMMUNICATION_DELIVERY_SCOPE_INVALID");
   }
+  const scopeWhere = scope ? {
+    id: scope.messageLogId, providerAccountKey: scope.accountKey,
+    organizationId: scope.organizationId, propertyId: scope.propertyId,
+  } : {};
 
-  const successful =
-    outcome.status === "DELIVERED" ||
-    outcome.status === "READ";
+  // Re-read after a competing callback wins. Never overwrite evidence using
+  // a stale snapshot, and never acknowledge an exhausted conflict as applied.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existing = await prisma.messageLog.findFirst({
+      where: {
+        ...scopeWhere,
+        provider: outcome.provider,
+        providerMessageId: outcome.providerMessageId,
+      },
+      select: {
+        id: true,
+        providerDeliveryStatus: true,
+        providerStatusUpdatedAt: true,
+        deliveredAt: true,
+      },
+    });
 
-  await prisma.messageLog.update({
-    where: {
-      id: existing.id,
-    },
-    data: {
-      providerDeliveryStatus: outcome.status,
-      providerStatusUpdatedAt: outcome.eventAt,
-      providerErrorCode: successful
-        ? null
-        : outcome.errorCode ?? null,
-      providerErrorMessage: successful
-        ? null
-        : outcome.errorMessage ?? null,
-      ...(outcome.deliveredAt && !existing.deliveredAt
-        ? { deliveredAt: outcome.deliveredAt }
-        : {}),
-    },
-  });
+    if (!existing) {
+      return { matched: false, applied: false, messageLogId: null as string | null };
+    }
 
-  return {
-    matched: true,
-    applied: true,
-    messageLogId: existing.id,
-  };
+    if (!shouldApplyProviderDeliveryTransition(existing.providerDeliveryStatus, outcome.status)) {
+      return { matched: true, applied: false, messageLogId: existing.id };
+    }
+
+    const successful = outcome.status === "DELIVERED" || outcome.status === "READ";
+    const deliveredAt = existing.deliveredAt ?? outcome.deliveredAt ?? null;
+    // A stronger terminal event may arrive late. Preserve that evidence while
+    // keeping the status timestamp at least as recent as the stored delivery.
+    const providerStatusUpdatedAt = new Date(Math.max(
+      outcome.eventAt.getTime(),
+      existing.providerStatusUpdatedAt?.getTime() ?? -Infinity,
+      deliveredAt?.getTime() ?? -Infinity,
+    ));
+    if (existing.providerDeliveryStatus === outcome.status &&
+        existing.providerStatusUpdatedAt?.getTime() === providerStatusUpdatedAt.getTime() &&
+        existing.deliveredAt?.getTime() === deliveredAt?.getTime()) {
+      return { matched: true, applied: false, messageLogId: existing.id };
+    }
+
+    const updated = await prisma.messageLog.updateMany({
+      where: {
+        ...scopeWhere,
+        id: existing.id,
+        provider: outcome.provider,
+        providerMessageId: outcome.providerMessageId,
+        providerDeliveryStatus: existing.providerDeliveryStatus,
+        providerStatusUpdatedAt: existing.providerStatusUpdatedAt,
+        deliveredAt: existing.deliveredAt,
+      },
+      data: {
+        providerDeliveryStatus: outcome.status,
+        providerStatusUpdatedAt,
+        providerErrorCode: successful ? null : outcome.errorCode ?? null,
+        providerErrorMessage: successful ? null : outcome.errorMessage ?? null,
+        ...(outcome.deliveredAt && !existing.deliveredAt
+          ? { deliveredAt: outcome.deliveredAt }
+          : {}),
+      },
+    });
+    if (updated.count === 1) {
+      return { matched: true, applied: true, messageLogId: existing.id };
+    }
+  }
+  throw new Error("COMMUNICATION_DELIVERY_RECEIPT_CONFLICT");
 }

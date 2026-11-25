@@ -1,3 +1,4 @@
+import { deliveryAccountBindingEnabled, readDeliveryAccountKey } from "./message-delivery-account-binding.service";
 import { resolvePrecheckinDirectBookingUrl } from "./precheckin-direct-booking-link.service.js";
 import { formatPropertyArrivalLocation } from "./property-arrival-location.js";
 import { guestAppActivationUrl } from "../channex-messaging/airbnb-access.policy.js";
@@ -5,11 +6,13 @@ import { isChannexGuestRegistrationExempt } from "./guest-registration-channel.p
 import { retireAirbnbLegacyRetry } from "../channex-messaging/airbnb-access.service.js";
 import { isOtaGuestExternalDeliveryBlocked } from "./ota-guest-external-messaging.policy.js";
 import { createHash } from "node:crypto";
+import { firstPrecheckinBlockReason } from "./guest-journey-communications-precheckin.policy";
 
 import { PrismaClient, ReservationStatus } from "@prisma/client";
 
 import { sendSms } from "../integrations/twilio/twilio.client";
 import {
+  getResendDeliveryAccountKey,
   sendDirectBookingGuestCancellationEmail,
   sendDirectBookingGuestConfirmation,
   sendDirectBookingHostCancellationNotification,
@@ -59,6 +62,11 @@ function clean(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function providerIdentifier(result: any): string | null {
+  return [result?.sid, result?.data?.id, result?.providerMessageId, result?.id]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? null;
+}
+
 function parseEmailEnvelope(body: string): {
   type: string;
   retryPayload: Record<string, unknown>;
@@ -91,7 +99,7 @@ function datesMatch(value: unknown, current: Date): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.getTime() === current.getTime();
 }
 
-async function defaultSendEmail(input: {
+async function sendEmailWithoutAccountEnvelope(input: {
   prisma: PrismaClient;
   type: string;
   to: string;
@@ -242,6 +250,13 @@ async function defaultSendEmail(input: {
   }
 }
 
+async function defaultSendEmail(input: Parameters<typeof sendEmailWithoutAccountEnvelope>[0]): Promise<unknown> {
+  const accountKey = deliveryAccountBindingEnabled() ? getResendDeliveryAccountKey() : null;
+  const result = await sendEmailWithoutAccountEnvelope(input);
+  return accountKey && result && typeof result === "object"
+    ? { ...result, deliveryAccountKey: accountKey } : result;
+}
+
 const DEFAULT_DEPENDENCIES: DeliveryDependencies = {
   sendSms,
   sendEmail: defaultSendEmail,
@@ -258,6 +273,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   options: {
     now?: Date;
     providerTimeoutMs?: number;
+    // Isolated first-send certification opts into delivery evidence and legacy
+    // pre-check-in eligibility. Production composition does not enable this yet.
+    firstSendContract?: "PRECHECKIN_DELIVERY_V1";
   } = {},
   dependencies: DeliveryDependencies = DEFAULT_DEPENDENCIES
 ): Promise<CommunicationDeliveryAdapterResult> {
@@ -268,7 +286,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     throw new Error("GUEST_JOURNEY_COMMUNICATIONS_ADAPTER_CONTRACT_MISMATCH");
   }
 
+  const bindAccount = deliveryAccountBindingEnabled();
   const now = new Date(options.now ?? new Date());
+  const firstSend = options.firstSendContract === "PRECHECKIN_DELIVERY_V1";
   if (Number.isNaN(now.getTime())) {
     throw new Error("GUEST_JOURNEY_COMMUNICATIONS_ADAPTER_NOW_INVALID");
   }
@@ -280,6 +300,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   const messageLogId = clean(claim.payload.messageLogId);
   const requestedType = clean(claim.payload.communicationType);
   const requestedChannel = clean(claim.payload.channel).toLowerCase();
+  const deliveryProvider = requestedChannel === "sms" ? "twilio" : "resend";
   if (!messageLogId || !requestedType || !["email", "sms"].includes(requestedChannel)) {
     return {
       providerCalls: 0,
@@ -304,6 +325,10 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       },
       select: {
         status: true,
+        paymentState: true,
+        createdAt: true,
+        propertyId: true,
+        externalRaw: true,
         source: true,
         externalProvider: true,
         externalId: true,
@@ -319,6 +344,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
         property: {
           select: {
             name: true,
+            status: true,
             timezone: true,
           },
         },
@@ -338,6 +364,33 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
 
   if (!reservation || !message) {
     throw new Error("COMMUNICATION_SCOPE_OR_MESSAGE_MISMATCH");
+  }
+
+  if (firstSend && (requestedType !== "PRECHECKIN" || claim.intentType !== "REQUEST_COMMUNICATION")) {
+    throw new Error("COMMUNICATION_FIRST_SEND_CONTRACT_MISMATCH");
+  }
+  const pendingReceipt = (providerCalls: 0 | 1, reason: string): CommunicationDeliveryAdapterResult => ({
+    providerCalls,
+    completion: {
+      kind: "WAITING_FOR_EVIDENCE", messageLogId, communicationType: requestedType, channel: requestedChannel,
+      outcomeEvidenceFingerprint: hashEvidence({ messageLogId, reason }),
+      errorCode: reason, errorDetail: "First-send completion requires current eligibility and a correlated delivery receipt; no blind replay.",
+    },
+  });
+  if (firstSend && dependencies === DEFAULT_DEPENDENCIES) {
+    const approvedRecipient = requestedChannel === "sms"
+      ? process.env.GUEST_JOURNEY_CANARY_SMS
+      : process.env.GUEST_JOURNEY_CANARY_EMAIL;
+    if (!approvedRecipient || approvedRecipient !== message.to ||
+        claim.organizationId !== process.env.GUEST_JOURNEY_CANARY_ORGANIZATION_ID ||
+        claim.propertyId !== process.env.GUEST_JOURNEY_CANARY_PROPERTY_ID ||
+        claim.reservationId !== process.env.GUEST_JOURNEY_CANARY_RESERVATION_ID) {
+      return pendingReceipt(0, "COMMUNICATION_FIRST_SEND_OUTSIDE_CANARY");
+    }
+  }
+  if (firstSend) {
+    const blocked = firstPrecheckinBlockReason(reservation, requestedChannel as "email" | "sms", now, dependencies === DEFAULT_DEPENDENCIES);
+    if (blocked) return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
   }
 
   // A guest OTA's operational email/SMS belongs to Channex. This fence also
@@ -367,6 +420,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   }
 
   if (message.status === "SENT") {
+    if (firstSend) return pendingReceipt(0, "COMMUNICATION_DELIVERY_RECEIPT_REQUIRED");
     return {
       providerCalls: 0,
       completion: {
@@ -453,7 +507,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     (!reservationCancelled && cancellationMessage) ||
     !datesMatch(retryPayload.checkIn, reservation.checkIn) ||
     !datesMatch(retryPayload.checkOut, reservation.checkOut) ||
-    (requestedType === "PRECHECKIN" && now >= reservation.checkIn) ||
+    (requestedType === "PRECHECKIN" && now >= reservation.checkIn && !firstSend) ||
     (requestedType === "CHECKOUT" && now < reservation.checkOut);
 
   if (obsolete) {
@@ -509,6 +563,11 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
     select: {
       status: true,
+      paymentState: true,
+      createdAt: true,
+      propertyId: true,
+      property: {select: {status: true}},
+      externalRaw: true,
       source: true,
       externalProvider: true,
       externalId: true,
@@ -525,6 +584,15 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       data: { status: "FAILED", error: "Tenant canary changed before provider call" },
     });
     throw new Error("COMMUNICATION_CANARY_CHANGED_BEFORE_SEND");
+  }
+  if (firstSend) {
+    const blocked = firstPrecheckinBlockReason(currentReservation, requestedChannel as "email" | "sms", now, dependencies === DEFAULT_DEPENDENCIES);
+    if (blocked) {
+      const restored = await prisma.messageLog.updateMany({ where: { id: message.id, status: "E7_SENDING" },
+        data: { status: "APMS_PENDING", error: `COMMUNICATION_FIRST_SEND_${blocked}` } });
+      if (restored.count !== 1) throw new Error("COMMUNICATION_FIRST_SEND_FENCE_LOST");
+      return pendingReceipt(0, `COMMUNICATION_FIRST_SEND_${blocked}`);
+    }
   }
   const currentCancelled =
     currentReservation.status === ReservationStatus.CANCELLED ||
@@ -621,6 +689,9 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   }
 
   let providerResult: any;
+  const dispatchRetryCount = message.retryCount;
+  let timedOut = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const providerPromise = requestedChannel === "sms"
       ? dependencies.sendSms(message.to, smsBody)
@@ -633,12 +704,34 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
           organizationId: claim.organizationId,
           propertyId: claim.propertyId,
         });
+    // A late acknowledgement is acceptance evidence, never proof of delivery.
+    // Keep the send fence until receipt reconciliation can establish the result.
+    void providerPromise.then(async result => {
+      if (!timedOut) return;
+      const id = providerIdentifier(result);
+      if (!id) return;
+      const persisted = await prisma.messageLog.updateMany({
+        where: {
+          id: message.id, organizationId: claim.organizationId, propertyId: claim.propertyId,
+          reservationId: claim.reservationId, status: "E7_SENDING", providerMessageId: null,
+          retryCount: { in: [dispatchRetryCount, dispatchRetryCount + 1] },
+        },
+        data: { providerMessageId: id, provider: deliveryProvider, providerAccountKey: bindAccount ? readDeliveryAccountKey(deliveryProvider, result) : null },
+      });
+      if (persisted.count !== 1) {
+        console.warn("COMMUNICATION_LATE_ACK_FENCE_LOST", { messageLogId, intentId: claim.intentId });
+      }
+    }, () => {}).catch(() => {
+      console.error("COMMUNICATION_LATE_ACK_PERSISTENCE_FAILED", { messageLogId, intentId: claim.intentId });
+    });
     providerResult = await Promise.race([
       providerPromise,
-      new Promise((_, reject) => setTimeout(
-        () => reject(new Error("COMMUNICATION_PROVIDER_TIMEOUT")),
-        providerTimeoutMs
-      )),
+      new Promise((_, reject) => {
+        deadline = setTimeout(() => {
+          timedOut = true;
+          reject(new Error("COMMUNICATION_PROVIDER_TIMEOUT"));
+        }, providerTimeoutMs);
+      }),
     ]);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -665,15 +758,42 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
       };
     }
     throw error;
+  } finally {
+    clearTimeout(deadline);
   }
 
-  const providerMessageId = providerResult?.sid ?? providerResult?.data?.id ??
-    providerResult?.providerMessageId ?? providerResult?.id ?? null;
+  const providerMessageId = providerIdentifier(providerResult);
+  if (!providerMessageId) {
+    const uncertain = await prisma.messageLog.updateMany({
+      where: { id: message.id, status: "E7_SENDING" },
+      data: {
+        retryCount: { increment: 1 },
+        error: "COMMUNICATION_PROVIDER_ACK_MISSING",
+      },
+    });
+    if (uncertain.count !== 1) {
+      throw new Error("COMMUNICATION_DELIVERY_RESULT_PERSISTENCE_LOST");
+    }
+    return {
+      providerCalls: 1,
+      completion: {
+        kind: "WAITING_FOR_EVIDENCE",
+        outcomeEvidenceFingerprint: hashEvidence({ messageLogId, status: "E7_SENDING", reason: "ACK_MISSING" }),
+        errorCode: "COMMUNICATION_PROVIDER_ACK_MISSING",
+        errorDetail: "The provider returned no valid message identifier; acceptance is uncertain and automatic replay is blocked.",
+        messageLogId,
+        communicationType: requestedType,
+        channel: requestedChannel,
+      },
+    };
+  }
   const persisted = await prisma.messageLog.updateMany({
     where: { id: message.id, status: "E7_SENDING" },
     data: {
-      status: "SENT",
+      status: firstSend || (bindAccount && !readDeliveryAccountKey(deliveryProvider, providerResult)) ? "E7_SENDING" : "SENT",
       providerMessageId,
+      provider: deliveryProvider,
+      providerAccountKey: bindAccount ? readDeliveryAccountKey(deliveryProvider, providerResult) : null,
       retryCount: { increment: 1 },
       error: null,
     },
@@ -681,6 +801,11 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   if (persisted.count !== 1) {
     throw new Error("COMMUNICATION_DELIVERY_RESULT_PERSISTENCE_LOST");
   }
+
+  if (bindAccount && !readDeliveryAccountKey(deliveryProvider, providerResult)) {
+    return pendingReceipt(1, "COMMUNICATION_PROVIDER_ACCOUNT_UNCONFIRMED");
+  }
+  if (firstSend) return pendingReceipt(1, "COMMUNICATION_DELIVERY_RECEIPT_REQUIRED");
 
   return {
     providerCalls: 1,
