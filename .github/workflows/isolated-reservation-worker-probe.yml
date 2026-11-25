@@ -24,3 +24,21 @@ jobs:
         run: |
           test "$(docker network inspect worker-qa --format '{{.Internal}}')" = true
           docker run --rm --network worker-qa -v "$PWD:/app" -w /app -e NODE_ENV=test -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa node:22-bookworm bash -ec './node_modules/.bin/prisma migrate deploy --schema ./prisma && node qa-worker-probe.mjs'
+      - name: Check rollback migration gates on the upgraded disposable database
+        uses: actions/checkout@v4
+        with:
+          ref: f4606c48f42738e8a830335841e5ca6450f545a5
+          path: baseline
+          persist-credentials: false
+      - name: Exercise original worker predeploy and API migration commands
+        run: |
+          docker run --rm --network worker-qa -v "$PWD:/app" -w /app/baseline -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa node:22-bookworm bash -ec '
+            ln -s ../node_modules node_modules
+            set +e
+            ./node_modules/.bin/prisma migrate status --schema ./prisma
+            worker=$?
+            ./node_modules/.bin/prisma migrate deploy --schema ./prisma
+            api=$?
+            echo "ROLLBACK_GATE worker=$worker api=$api"
+            test "$worker" = 0 && test "$api" = 0
+          '
