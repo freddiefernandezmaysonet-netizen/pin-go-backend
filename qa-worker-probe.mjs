@@ -11,6 +11,7 @@ const reservationId = "qa-worker-reservation";
 const guestEmail = "worker@example.invalid";
 const now = Date.now();
 let child;
+let api;
 try {
   await db.organization.create({data: {id: organizationId, name: "Worker QA"}});
   await db.property.create({data: {id: propertyId, organizationId, name: "Worker QA", timezone: "America/Puerto_Rico", isTestProperty: true, address1: "Synthetic location"}});
@@ -57,7 +58,35 @@ try {
     assert.equal(rows.length,1);
     assert.equal(rows[0].providerMessageId,calls.find(c=>[c.to].flat().includes(to)).id);
   }
+  const key = Buffer.from("isolated-webhook-key");
+  api = spawn(process.execPath,["--import","tsx","src/server.ts"],{stdio:"inherit",env:{
+    ...process.env, PORT:"3081", NODE_ENV:"production", APP_URL:"https://qa.invalid",
+    FRONTEND_ORIGIN:"https://qa.invalid", STRIPE_SECRET_KEY:"sk_test_synthetic", JWT_SECRET:"synthetic-test-only",
+    MESSAGE_DELIVERY_WEBHOOKS_ENABLED:"1", MESSAGE_DELIVERY_RECEIPT_INBOX_MODE:"OFF",
+    RESEND_WEBHOOK_SECRET:"whsec_"+key.toString("base64")
+  }});
+  for(let n=0;n<60;n++){
+    if(await fetch("http://localhost:3081/ready").then(r=>r.ok).catch(()=>false)) break;
+    assert.equal(api.exitCode,null);
+    await delay(500);
+  }
+  for(const call of calls){
+    const payload=JSON.stringify({type:"email.delivered",data:{email_id:call.id},created_at:new Date().toISOString()});
+    const timestamp=String(Math.floor(Date.now()/1000));
+    const signature=(await import("node:crypto")).createHmac("sha256",key).update([call.id,timestamp,payload].join(".")).digest("base64");
+    const response=await fetch("http://localhost:3081/webhooks/delivery/resend",{method:"POST",body:payload,headers:{
+      "Content-Type":"application/json","svix-id":call.id,"svix-timestamp":timestamp,"svix-signature":"v1,"+signature
+    }});
+    const result=await response.json();
+    assert.equal(response.status,200,JSON.stringify(result));
+    assert.equal(result.matched,true);
+    const row=await db.messageLog.findFirstOrThrow({where:{providerMessageId:call.id}});
+    assert.equal(row.providerDeliveryStatus,"DELIVERED");
+    assert.equal(row.reservationId,[call.to].flat().includes(guestEmail)?reservationId:legacyId);
+  }
+  console.log("Both simulated signed delivery receipts matched the correct reservation");
 } finally {
+  if(api && api.exitCode===null) api.kill("SIGTERM");
   if (child && child.exitCode === null) { const stopped = once(child,"exit"); child.kill("SIGTERM"); await stopped; }
   await db.$disconnect();
 }
