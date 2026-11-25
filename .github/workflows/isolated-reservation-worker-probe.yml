@@ -42,3 +42,23 @@ jobs:
             echo "ROLLBACK_GATE worker=$worker api=$api"
             test "$worker" = 0 && test "$api" = 0
           '
+      - name: Install the baseline lockfile and generate its own Prisma client
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app/baseline -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa node:22-bookworm bash -ec 'unlink node_modules && npm ci && ./node_modules/.bin/prisma generate --schema ./prisma'
+      - name: Verify restored API, worker cycles and synthetic reservation
+        run: |
+          docker run --rm --network worker-qa -v "$PWD:/app" -w /app/baseline -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa -e NODE_ENV=production -e PORT=3010 -e STRIPE_SECRET_KEY=sk_test_synthetic -e JWT_SECRET=isolated-rollback-rehearsal-only -e APP_URL=https://rollback.invalid -e FRONTEND_ORIGIN=https://rollback.invalid -e RESERVATION_WORKER_POLL_MS=2000 node:22-bookworm bash -ec '
+            ./node_modules/.bin/tsx src/server.ts >/tmp/api.log 2>&1 &
+            api=$!
+            ./node_modules/.bin/tsx src/workers/reservation.worker.ts >/tmp/worker.log 2>&1 &
+            worker=$!
+            for attempt in $(seq 1 70); do
+              kill -0 "$api" "$worker" || { tail -30 /tmp/api.log /tmp/worker.log; exit 1; }
+              if curl -fsS http://127.0.0.1:3010/ready >/tmp/ready.json && [ "$(grep -c "processCheckouts result" /tmp/worker.log)" -ge 2 ]; then break; fi
+              sleep 1
+            done
+            curl -fsS http://127.0.0.1:3010/ready
+            test "$(grep -c "processCheckouts result" /tmp/worker.log)" -ge 2
+            kill -0 "$api" "$worker"
+          '
+          test "$(docker exec worker-db psql -U postgres -d worker_qa -Atc "SELECT count(*) FROM \"Reservation\" WHERE id = 'qa-worker-reservation' AND \"paymentState\" = 'PAID'")" = 1
