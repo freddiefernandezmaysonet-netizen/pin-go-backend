@@ -1,0 +1,26 @@
+name: Isolated reservation worker probe
+on:
+  push:
+    branches: [qa/isolated-reservation-worker-20261125]
+    paths: [qa-worker-probe.mjs, .github/workflows/isolated-reservation-worker-probe.yml]
+permissions:
+  contents: read
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare disposable containers
+        run: |
+          docker pull node:22-bookworm
+          docker pull postgres:18
+          docker network create --internal worker-qa
+          docker run -d --name worker-db --network worker-qa -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=worker_qa postgres:18
+          docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa node:22-bookworm bash -ec 'npm ci && npx prisma generate --schema ./prisma'
+      - name: Exercise actual worker without external network access
+        run: |
+          test "$(docker network inspect worker-qa --format '{{.Internal}}')" = true
+          docker run --rm --network worker-qa -v "$PWD:/app" -w /app -e NODE_ENV=test -e DATABASE_URL=postgresql://postgres:synthetic@worker-db/worker_qa node:22-bookworm bash -ec './node_modules/.bin/prisma migrate deploy --schema ./prisma && node qa-worker-probe.mjs'
