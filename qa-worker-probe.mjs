@@ -20,8 +20,15 @@ try {
     createdAt: new Date(now - 86400000), checkIn: new Date(now + 7200000), checkOut: new Date(now + 86400000),
     guestJourney: {create: {}}
   }});
-  child = spawn(process.execPath, ["--import", "tsx", "src/workers/reservation.worker.ts"], {
-    env: {...process.env, GUEST_JOURNEY_CANARY_EXECUTE: "1", MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED: "1",
+  const legacyId = "qa-legacy-reservation";
+  await db.reservation.create({data: {
+    id: legacyId, propertyId, guestName: "Legacy QA", guestEmail:"legacy@example.invalid",
+    status:"ACTIVE", paymentState:"PAID", source:"DIRECT_BOOKING",
+    createdAt:new Date(now-86400000),checkIn:new Date(now+7200000),checkOut:new Date(now+86400000),
+    guestJourney:{create:{}}
+  }});
+  child = spawn(process.execPath, ["--import", "./qa-email-provider.mjs", "--import", "tsx", "src/workers/reservation.worker.ts"], {
+    env: {...process.env, RESEND_API_KEY:"synthetic", MESSAGE_DELIVERY_RESEND_ACCOUNT_KEY:"qa-resend", GUEST_JOURNEY_CANARY_EXECUTE: "1", MESSAGE_DELIVERY_ACCOUNT_BINDING_ENABLED: "1",
       GUEST_JOURNEY_CANARY_ORGANIZATION_ID: organizationId, GUEST_JOURNEY_CANARY_PROPERTY_ID: propertyId,
       GUEST_JOURNEY_CANARY_RESERVATION_ID: reservationId, GUEST_JOURNEY_CANARY_EMAIL: guestEmail,
       GUEST_JOURNEY_CANARY_SMS: "disabled", RESERVATION_WORKER_POLL_MS: "2000"},
@@ -41,7 +48,15 @@ try {
   console.log("WORKER_RESULT", JSON.stringify({messages,ownership,intents}));
   assert.deepEqual(ownership,[{channel:"email",status:"E7_OWNED"}]);
   assert.equal(intents.length,1);
-  assert.deepEqual(messages.map(m=>[m.channel,m.providerMessageId]),[["email",null]]);
+  const legacy = await db.messageLog.findMany({where:{reservationId:legacyId},select:{channel:true,status:true,providerMessageId:true}});
+  const calls = (await (await import("node:fs/promises")).readFile("/tmp/qa-email-calls.jsonl","utf8")).trim().split("\n").map(JSON.parse);
+  console.log("COEXISTENCE",JSON.stringify({legacy,calls}));
+  assert.equal(await db.guestJourneyCoordinationIntent.count({where:{reservationId:legacyId,reasonCode:"PRECHECKIN_CANARY_FIRST_SEND"}}),0);
+  assert.deepEqual(calls.flatMap(c=>c.to).sort(),[guestEmail,"legacy@example.invalid"].sort());
+  for(const [rows,to] of [[legacy,"legacy@example.invalid"],[messages,guestEmail]]){
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].providerMessageId,calls.find(c=>[c.to].flat().includes(to)).id);
+  }
 } finally {
   if (child && child.exitCode === null) { const stopped = once(child,"exit"); child.kill("SIGTERM"); await stopped; }
   await db.$disconnect();
