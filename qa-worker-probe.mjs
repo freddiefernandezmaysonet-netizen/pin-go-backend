@@ -19,7 +19,7 @@ try {
   await db.organization.create({data: {id: organizationId, name: "Worker QA"}});
   await db.property.create({data: {id: propertyId, organizationId, name: "Worker QA", timezone: "America/Puerto_Rico", isTestProperty: true, address1: "Synthetic location"}});
   await db.reservation.create({data: {
-    id: reservationId, propertyId, guestName: "QA", guestEmail,guestPhone:pilotPhone,externalRaw:{...smsConsent,demo:true,paymentSimulated:true},
+    id: reservationId, propertyId, guestName: "QA", guestEmail,guestPhone:pilotPhone,externalRaw:{consent:{stayNotificationsConsent:true,smsConsent:true,consentSource:"INTERNAL_DEMO_CENTER"},demo:true,paymentSimulated:true},
     status: "ACTIVE", paymentState: "PAID", source: "INTERNAL_DEMO_DIRECT_BOOKING",externalProvider:"PIN_GO_INTERNAL_DEMO",externalId:"DEMO-console",
     createdAt: new Date(now - 86400000), checkIn: new Date(now + 7200000), checkOut: new Date(now + 86400000),
     guestJourney: {create: {}}

@@ -15,7 +15,8 @@ export function firstPrecheckinBlockReason(r: FirstPrecheckinReservation, channe
   if (![now, r.createdAt, r.checkIn, r.checkOut].every(d => d instanceof Date && Number.isFinite(d.getTime())) || r.checkIn >= r.checkOut)
     return "INVALID_DATES";
   const directBooking = r.source === "DIRECT_BOOKING" && (r.externalProvider ? r.externalProvider === "PIN_GO_DIRECT" : !r.externalId);
-  if (!directBooking && !(scopedPilot && isInternalDemo(r)))
+  const pilotDemo = scopedPilot && isInternalDemo(r);
+  if (!directBooking && !pilotDemo)
     return "EXTERNAL_OWNER_REQUIRED";
   if (r.status !== "ACTIVE" || r.cancelledAt) return "RESERVATION_INACTIVE";
   if (r.paymentState !== "PAID") return "PAYMENT_NOT_READY";
@@ -26,7 +27,11 @@ export function firstPrecheckinBlockReason(r: FirstPrecheckinReservation, channe
     if (!r.guestEmail?.trim()) return "EMAIL_MISSING";
   } else {
     if (!r.guestPhone?.trim()) return "PHONE_MISSING";
-    if (!isGuestOperationalSmsEligible(r)) return "SMS_NOT_ELIGIBLE";
+    if (pilotDemo) {
+      const consent = (r.externalRaw as {consent?: {smsConsent?: boolean; stayNotificationsConsent?: boolean; consentSource?: string}}).consent;
+      if (consent?.consentSource !== "INTERNAL_DEMO_CENTER" || consent.smsConsent !== true || consent.stayNotificationsConsent !== true)
+        return "SMS_NOT_ELIGIBLE";
+    } else if (!isGuestOperationalSmsEligible(r)) return "SMS_NOT_ELIGIBLE";
   }
   return null;
 }
