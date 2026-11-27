@@ -695,6 +695,7 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   try {
     const providerPromise = requestedChannel === "sms"
       ? dependencies.sendSms(message.to, smsBody, firstSend ? {
+          messageLogId: message.id,
           organizationId: claim.organizationId,
           propertyId: claim.propertyId,
           reservationId: claim.reservationId,
@@ -827,3 +828,4 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
     },
   };
 }
+
