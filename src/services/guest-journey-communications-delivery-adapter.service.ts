@@ -694,7 +694,11 @@ export async function executeGuestJourneyCommunicationDeliveryAdapter(
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
     const providerPromise = requestedChannel === "sms"
-      ? dependencies.sendSms(message.to, smsBody)
+      ? dependencies.sendSms(message.to, smsBody, firstSend ? {
+          organizationId: claim.organizationId,
+          propertyId: claim.propertyId,
+          reservationId: claim.reservationId,
+        } : undefined)
       : dependencies.sendEmail({
           prisma,
           type: requestedType,
