@@ -6,16 +6,29 @@ const statuses = new Set(["ACCEPTED", "QUEUED", "SENDING", "SENT", "DELIVERY_DEL
   "DELIVERED", "READ", "UNDELIVERED", "FAILED", "BOUNCED", "SUPPRESSED", "COMPLAINED", "CANCELED"]);
 
 // No dispatch dependency: this job only recovers already authenticated evidence.
-export async function recoverDeliveryReceipts(db: PrismaClient, env: NodeJS.ProcessEnv = process.env) {
+export async function recoverDeliveryReceipts(db: PrismaClient, env: NodeJS.ProcessEnv = process.env,
+  canary?: {organizationId: string; propertyId: string; reservationId: string}) {
   const mode = env.MESSAGE_DELIVERY_RECEIPT_RECOVERY_MODE;
   if (!mode || mode === "OFF") return {examined: 0, processed: 0, providerCalls: 0 as const};
   if (mode !== "APPLY") throw Error("DELIVERY_RECEIPT_RECOVERY_MODE_INVALID");
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await db.$transaction(async tx => {
+        const scope = canary ? Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "MessageLog" m
+          JOIN "GuestJourneyCoordinationIntent" i
+            ON i."reservationId" = m."reservationId" AND i.payload->>'messageLogId' = m.id
+          WHERE m."organizationId" = ${canary.organizationId} AND m."propertyId" = ${canary.propertyId}
+            AND m."reservationId" = ${canary.reservationId} AND m.channel = 'sms'
+            AND m."communicationType" = 'PRECHECKIN' AND m.provider = 'twilio'
+            AND m.provider = "MessageDeliveryReceipt".provider
+            AND m."providerAccountKey" = "MessageDeliveryReceipt"."accountKey"
+            AND m."providerMessageId" = "MessageDeliveryReceipt"."providerMessageId"
+            AND i."reasonCode" = 'PRECHECKIN_CANARY_FIRST_SEND'
+        )` : Prisma.empty;
         const rows = await tx.$queryRaw<MessageDeliveryReceipt[]> `
           SELECT * FROM "MessageDeliveryReceipt"
-          WHERE "processedAt" IS NULL
+          WHERE "processedAt" IS NULL ${scope}
             AND ("lastAttemptAt" IS NULL OR "lastAttemptAt" < NOW() - INTERVAL '30 seconds')
           ORDER BY "lastAttemptAt" NULLS FIRST, "receivedAt", id
           LIMIT 50 FOR UPDATE SKIP LOCKED`;
