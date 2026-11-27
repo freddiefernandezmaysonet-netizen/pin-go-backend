@@ -3,7 +3,7 @@ import test from "node:test";
 import { resolveTwilioStatusCallback } from "./twilio.client";
 
 test("scoped SMS receipt requires an exact enabled canary, leaving global behavior intact", () => {
-  const scope = { organizationId: "lab-org", propertyId: "lab-property", reservationId: "lab-reservation" };
+  const scope = { organizationId: "lab-org", propertyId: "lab-property", reservationId: "lab-reservation", messageLogId: "gjfirst_" + "a".repeat(64) };
   const recipient = "+15005550001";
   const env = {
     NODE_ENV: "production", API_BASE_URL: "https://lab.invalid", TWILIO_AUTH_TOKEN: "test-only",
@@ -13,7 +13,7 @@ test("scoped SMS receipt requires an exact enabled canary, leaving global behavi
     GUEST_JOURNEY_CANARY_RESERVATION_ID: scope.reservationId, GUEST_JOURNEY_CANARY_SMS: recipient,
   };
   const callback = "https://lab.invalid/webhooks/delivery/twilio";
-  assert.equal(resolveTwilioStatusCallback(env, scope, recipient), callback);
+  assert.equal(resolveTwilioStatusCallback(env, scope, recipient), callback + "/canary/" + scope.messageLogId);
   assert.equal(resolveTwilioStatusCallback(env), null);
   for (const key of Object.keys(scope)) {
     assert.equal(resolveTwilioStatusCallback(env, { ...scope, [key]: "other" }, recipient), null);
@@ -24,3 +24,4 @@ test("scoped SMS receipt requires an exact enabled canary, leaving global behavi
   }
   assert.equal(resolveTwilioStatusCallback({ ...env, MESSAGE_DELIVERY_WEBHOOKS_ENABLED: "1" }), callback);
 });
+
