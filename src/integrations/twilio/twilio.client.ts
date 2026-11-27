@@ -9,7 +9,7 @@ function cleanEnv(v?: string) {
     .replace(/^["']|["']$/g, ""); // quita comillas al inicio/fin
 }
 
-type CanarySmsScope = { organizationId: string; propertyId: string; reservationId: string };
+type CanarySmsScope = { organizationId: string; propertyId: string; reservationId: string; messageLogId: string };
 
 export function resolveTwilioStatusCallback(
   env: NodeJS.ProcessEnv = process.env,
@@ -21,6 +21,7 @@ export function resolveTwilioStatusCallback(
     !!scope?.organizationId && scope.organizationId === env.GUEST_JOURNEY_CANARY_ORGANIZATION_ID &&
     !!scope.propertyId && scope.propertyId === env.GUEST_JOURNEY_CANARY_PROPERTY_ID &&
     !!scope.reservationId && scope.reservationId === env.GUEST_JOURNEY_CANARY_RESERVATION_ID &&
+    /^gjfirst_[a-f0-9]{64}$/.test(scope.messageLogId) &&
     !!to && to === env.GUEST_JOURNEY_CANARY_SMS;
 
   if (env.MESSAGE_DELIVERY_WEBHOOKS_ENABLED !== "1" && !scopedCallback) {
@@ -50,7 +51,8 @@ export function resolveTwilioStatusCallback(
 
     return (
       url.toString().replace(/\/+$/, "") +
-      "/webhooks/delivery/twilio"
+      "/webhooks/delivery/twilio" +
+      (scopedCallback ? `/canary/${scope.messageLogId}` : "")
     );
   } catch {
     return null;
@@ -116,3 +118,4 @@ export async function sendSms(to: string, body: string, scope?: CanarySmsScope) 
 
   return { sid: msg.sid, status: msg.status, ...(bindAccount ? { deliveryAccountKey: ACCOUNT_SID } : {}) };
 }
+
