@@ -1,3 +1,4 @@
+import { recoverDeliveryReceipts } from "./message-delivery-receipt-recovery.service";
 import type { PrismaClient } from "@prisma/client";
 import { materializeScopedPrecheckin } from "./guest-journey-precheckin-materialization.service";
 import { runGuestJourneyCommunicationsOwnerCycle } from "./guest-journey-communications-owner-cycle.service";
@@ -15,6 +16,9 @@ export async function runPrecheckinCanary(db: PrismaClient, config: GuestJourney
   await materializeScopedPrecheckin(db, scope, reservationId, now, undefined, {email, sms});
   await runGuestJourneyCommunicationsOwnerCycle(db, {...config, enabled: true, organizationIds: [organizationId],
     propertyIds: [propertyId], batchSize: 2}, {now, canaryReservationId: reservationId});
+  if (process.env.GUEST_JOURNEY_CANARY_SMS_CALLBACK_ENABLED === "1") {
+    await recoverDeliveryReceipts(db, {MESSAGE_DELIVERY_RECEIPT_RECOVERY_MODE: "APPLY"}, {...scope, reservationId});
+  }
   const pending = await db.guestJourneyCoordinationIntent.findMany({where: {
     reservationId, targetEngine: "COMMUNICATIONS", reasonCode: "PRECHECKIN_CANARY_FIRST_SEND", status: "WAITING_FOR_EVIDENCE",
     reservation: {propertyId, property: {organizationId}},
