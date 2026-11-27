@@ -9,10 +9,21 @@ function cleanEnv(v?: string) {
     .replace(/^["']|["']$/g, ""); // quita comillas al inicio/fin
 }
 
+type CanarySmsScope = { organizationId: string; propertyId: string; reservationId: string };
+
 export function resolveTwilioStatusCallback(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  scope?: CanarySmsScope,
+  to?: string,
 ): string | null {
-  if (env.MESSAGE_DELIVERY_WEBHOOKS_ENABLED !== "1") {
+  const scopedCallback = env.GUEST_JOURNEY_CANARY_SMS_CALLBACK_ENABLED === "1" &&
+    env.GUEST_JOURNEY_CANARY_EXECUTE === "1" &&
+    !!scope?.organizationId && scope.organizationId === env.GUEST_JOURNEY_CANARY_ORGANIZATION_ID &&
+    !!scope.propertyId && scope.propertyId === env.GUEST_JOURNEY_CANARY_PROPERTY_ID &&
+    !!scope.reservationId && scope.reservationId === env.GUEST_JOURNEY_CANARY_RESERVATION_ID &&
+    !!to && to === env.GUEST_JOURNEY_CANARY_SMS;
+
+  if (env.MESSAGE_DELIVERY_WEBHOOKS_ENABLED !== "1" && !scopedCallback) {
     return null;
   }
 
@@ -82,7 +93,7 @@ function getTwilioEnv() {
   return { ACCOUNT_SID, API_KEY, API_SECRET, FROM };
 }
 
-export async function sendSms(to: string, body: string) {
+export async function sendSms(to: string, body: string, scope?: CanarySmsScope) {
   const { ACCOUNT_SID, API_KEY, API_SECRET, FROM } = getTwilioEnv();
   const bindAccount = deliveryAccountBindingEnabled();
   if (bindAccount && !/^AC[a-f0-9]{32}$/i.test(ACCOUNT_SID)) throw Error("DELIVERY_ACCOUNT_SID_INVALID");
@@ -92,7 +103,7 @@ export async function sendSms(to: string, body: string) {
   });
 
   const statusCallback =
-    resolveTwilioStatusCallback();
+    resolveTwilioStatusCallback(process.env, scope, to);
 
   const msg = await client.messages.create({
     from: FROM,
