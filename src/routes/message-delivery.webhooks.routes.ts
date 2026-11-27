@@ -179,9 +179,11 @@ export function buildMessageDeliveryWebhookRouter(
   );
 
   router.post(
-    "/webhooks/delivery/twilio",
+    ["/webhooks/delivery/twilio", "/webhooks/delivery/twilio/canary/:messageId"],
     async (req: any, res) => {
-      if (!deliveryWebhooksEnabled(env)) {
+      const messageId: string | undefined = req.params.messageId;
+      if (messageId && !/^gjfirst_[a-f0-9]{64}$/.test(messageId)) return res.sendStatus(404);
+      if (messageId ? env.GUEST_JOURNEY_CANARY_SMS_CALLBACK_ENABLED !== "1" : !deliveryWebhooksEnabled(env)) {
         return res.status(404).send(
           "MESSAGE_DELIVERY_WEBHOOKS_DISABLED"
         );
@@ -189,8 +191,8 @@ export function buildMessageDeliveryWebhookRouter(
 
       const authToken =
         clean(env.TWILIO_AUTH_TOKEN);
-      const callbackUrl =
-        twilioCallbackUrl(env);
+      const baseUrl = twilioCallbackUrl(env);
+      const callbackUrl = baseUrl && (messageId ? baseUrl + "/canary/" + messageId : baseUrl);
       const signature =
         clean(req.header("x-twilio-signature"));
 
@@ -229,7 +231,31 @@ export function buildMessageDeliveryWebhookRouter(
       }
 
       try {
-        const receipt = await captureVerifiedDeliveryReceipt(prisma, outcome, { accountSid: clean(req.body?.AccountSid) }, env);
+        if (messageId) {
+          const organizationId = clean(env.GUEST_JOURNEY_CANARY_ORGANIZATION_ID);
+          const propertyId = clean(env.GUEST_JOURNEY_CANARY_PROPERTY_ID);
+          const reservationId = clean(env.GUEST_JOURNEY_CANARY_RESERVATION_ID);
+          const recipient = clean(env.GUEST_JOURNEY_CANARY_SMS);
+          if (!organizationId || !propertyId || !reservationId || !recipient ||
+              req.body?.To !== recipient || req.body?.AccountSid !== env.TWILIO_ACCOUNT_SID) {
+            return res.sendStatus(403);
+          }
+          const message = await prisma.messageLog.findFirst({ where: {
+            id: messageId, organizationId, propertyId, reservationId, to: recipient,
+            channel: "sms", provider: "twilio", communicationType: "PRECHECKIN",
+            status: { in: ["E7_SENDING", "SENT"] },
+            OR: [{ providerMessageId: null }, { providerMessageId: outcome.providerMessageId }],
+          }, select: { id: true } });
+          if (!message) return res.sendStatus(404);
+          const intent = await prisma.guestJourneyCoordinationIntent.findFirst({ where: {
+            reservationId, reasonCode: "PRECHECKIN_CANARY_FIRST_SEND",
+            payload: { path: ["messageLogId"], equals: messageId },
+          }, select: { id: true } });
+          if (!intent) return res.sendStatus(404);
+        }
+        const receipt = await captureVerifiedDeliveryReceipt(prisma, outcome,
+          { accountSid: clean(req.body?.AccountSid) },
+          messageId ? { ...env, MESSAGE_DELIVERY_RECEIPT_INBOX_MODE: "CAPTURE" } : env);
         if (receipt.retained) return res.status(204).send();
         await recordMessageDeliveryOutcome(
           prisma,
@@ -266,3 +292,4 @@ export const __messageDeliveryWebhookInternals = {
   publicApiBaseUrl,
   twilioCallbackUrl,
 };
+
